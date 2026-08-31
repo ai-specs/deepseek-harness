@@ -329,6 +329,12 @@
     { "path": "./packages/lsp/lsp" },
     { "path": "./packages/lsp/lsp-stdio" },
     { "path": "./packages/lsp/tool-lsp" },
+    { "path": "./packages/integration/plugin-kestra-sync" },
+    { "path": "./packages/integration/plugin-nacos-config" },
+    { "path": "./packages/guard/plugin-fault-tolerance" },
+    { "path": "./packages/guard/plugin-runtime-guard" },
+    { "path": "./packages/llm/plugin-model-gateway" },
+    { "path": "./packages/context/plugin-context-manager" },
     { "path": "./apps/cli" }
   ]
 }

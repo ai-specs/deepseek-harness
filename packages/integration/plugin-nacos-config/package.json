@@ -1,0 +1,25 @@
+{
+  "name": "@deepseek-ai/dsh-plugin-nacos-config",
+  "description": "Nacos configuration client for dsh — config pull, long-listen, and skill-package registry sync",
+  "version": "0.1.2-alpha.3",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./core": { "types": "./lib/types/core.d.ts", "default": "./lib/core.js" },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  }
+}
