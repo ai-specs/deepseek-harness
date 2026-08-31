@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-root",
+  "name": "app-dsh",
   "version": "0.1.2-alpha.3",
   "license": "MIT",
   "private": true,
@@ -17,6 +17,8 @@
     "website"
   ],
   "scripts": {
+    "dev": "pnpm dsh web",
+    "start": "pnpm dsh headless",
     "build": "tsx scripts/build.ts",
     "build:official": "tsx scripts/build.ts --profile official",
     "build:lib": "npm run build:lib:host && npm run build:lib:client",
