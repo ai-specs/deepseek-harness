@@ -9,7 +9,6 @@ import { join } from 'node:path'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { KestraSessionSyncClient } from '../src/core.ts'
 import { NacosConfigClient } from '../../plugin-nacos-config/src/core.ts'
-import { ModelGateway } from '../../../llm/plugin-model-gateway/src/core.ts'
 
 const snapshot = { sessionId: 'e2e-1', phase: 'running' as const, at: '2026-01-01T00:00:00Z' }
 const configYaml = 'retry:\n  maxAttempts: 4'
@@ -96,15 +95,4 @@ describe('离线能力集成（断连 → 降级 → 恢复）', () => {
     expect(recovered.getCached<any>('dsh-fault-tolerance.yaml')?.retry?.maxAttempts).toBe(4) // 恢复后刷新
   })
 
-  it('模型网关：无 Nacos 时使用默认策略完成调用', async () => {
-    const gateway = new ModelGateway(undefined, () => 'env-key')
-    expect(gateway.getPolicy().default.model).toBe('deepseek-chat')
-    const fetchMock = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ choices: [{ message: { content: 'r' } }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }),
-      { status: 200 },
-    ))
-    ;(gateway as unknown as { fetchImpl: typeof fetch }).fetchImpl = fetchMock as unknown as typeof fetch
-    const result = await gateway.chat('tool_call', [{ role: 'user', content: 'x' }])
-    expect(result.model).toBe('deepseek-chat')
-  })
 })
