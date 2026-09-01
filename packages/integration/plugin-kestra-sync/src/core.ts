@@ -7,9 +7,15 @@
  * session end.
  */
 
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
 export interface KestraSyncConfig {
   /** Kestra API base URL, e.g. http://kestra.internal:8080 */
   baseUrl: string
+  /** 批量队列磁盘持久化路径（默认 ~/.dsh/sync-queue.jsonl），重启后待同步快照不丢 */
+  queuePath?: string
   /** Bearer token for the Kestra API gateway */
   token: string
   /** Tenant used for the API path (Kestra 2.x multi-tenancy) */
@@ -72,19 +78,54 @@ export class KestraSessionSyncClient {
   private timer: ReturnType<typeof setInterval> | undefined
   private inFlight = false
 
+  private readonly queuePath: string
+
   constructor(
     private readonly config: KestraSyncConfig,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly now: () => number = Date.now,
   ) {
-    // 批量定时器惰性启动：首次 enqueue 才出现（dispose 由调用方显式调用）
+    this.queuePath = config.queuePath ?? join(homedir(), '.dsh', 'sync-queue.jsonl')
+    this.loadQueueFromDisk()
+    // 批量定时器惰性启动：首次 enqueue 才出现
+  }
+
+  /** 队列磁盘持久化：每次变更后全量重写（JSONL，每行一个快照）。 */
+  private persistQueue(): void {
+    try {
+      if (this.queue.length === 0) {
+        writeFileSync(this.queuePath, '')
+        return
+      }
+      writeFileSync(this.queuePath, this.queue.map(s => JSON.stringify(s)).join('\n') + '\n')
+    } catch {
+      // 磁盘写入失败不阻塞同步主流程；内存队列仍是权威副本
+    }
+  }
+
+  private loadQueueFromDisk(): void {
+    try {
+      if (!existsSync(this.queuePath)) return
+      const lines = readFileSync(this.queuePath, 'utf8').split('\n').filter(l => l.trim())
+      for (const line of lines) {
+        try { this.queue.push(JSON.parse(line) as SessionSnapshot) } catch { /* 跳过损坏行 */ }
+      }
+      if (this.queue.length > 0) console.warn(`[kestra-sync] recovered ${this.queue.length} pending snapshot(s) from disk`)
+    } catch {
+      // 读取失败按空队列处理
+    }
   }
 
   /** Push immediately (realtime mode) or enqueue for the next batch flush. */
   async push(snapshot: SessionSnapshot): Promise<PushResult | undefined> {
     const enriched = { ...snapshot, at: new Date(this.now()).toISOString() }
     if ((this.config.mode ?? 'realtime') === 'batch') {
+      if (this.queue.length >= 1000) {
+        this.queue.shift()
+        console.warn('[kestra-sync] queue overflow (>1000), dropped the oldest snapshot')
+      }
       this.queue.push(enriched)
+      this.persistQueue()
       if (this.timer === undefined) {
         this.timer = setInterval(() => void this.flush(), this.config.batchIntervalMs ?? 2000)
       }
@@ -103,6 +144,7 @@ export class KestraSessionSyncClient {
       for (const snapshot of batch) results.push(await this.send(snapshot))
     } finally {
       this.inFlight = false
+      this.persistQueue() // 成功推送的已移除；失败重入队的保留在磁盘
     }
     return results
   }
@@ -118,6 +160,7 @@ export class KestraSessionSyncClient {
       if (attempt < 2) return this.send(snapshot, attempt + 1)
       if ((this.config.mode ?? 'realtime') === 'batch' && this.queue.length < 1000) {
         this.queue.push(snapshot)
+        this.persistQueue()
       }
       return { ok: false, status: 0, sessionId: snapshot.sessionId, phase: snapshot.phase }
     }

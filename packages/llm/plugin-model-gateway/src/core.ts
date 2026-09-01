@@ -14,6 +14,18 @@ export interface ModelRoute {
   maxTokens?: number
 }
 
+/** 离线兜底策略：Nacos 不可用且无缓存时，网关仍可用默认模型调用（密钥仍取自环境变量）。 */
+export const DEFAULT_POLICY: ModelGatewayPolicy = {
+  default: {
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    baseUrl: 'https://api.deepseek.com',
+    temperature: 0.7,
+    maxTokens: 4096,
+  },
+  budget: { perSessionTokenCap: 500000, perTaskTokenCap: 50000 },
+}
+
 export interface ModelGatewayPolicy {
   default: { provider: string; model: string; baseUrl: string; temperature?: number; maxTokens?: number }
   fallback?: { provider: string; model: string; baseUrl: string }
@@ -53,12 +65,21 @@ export function routeModel(policy: ModelGatewayPolicy, taskType: string, userId?
 export class ModelGateway {
   private sessionTokens = 0
 
+  private policy: ModelGatewayPolicy
+
   constructor(
-    private policy: ModelGatewayPolicy,
+    policy?: ModelGatewayPolicy,
     private readonly apiKeyFromEnv: (provider: string) => string | undefined = provider =>
       process.env[`${provider.toUpperCase()}_API_KEY`],
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+  ) {
+    this.policy = policy ?? DEFAULT_POLICY
+  }
+
+  /** 当前生效策略（调试与观察用）。 */
+  getPolicy(): ModelGatewayPolicy {
+    return this.policy
+  }
 
   updatePolicy(policy: ModelGatewayPolicy): void {
     this.policy = policy

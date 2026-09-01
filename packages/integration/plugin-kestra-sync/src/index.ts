@@ -11,7 +11,10 @@ import { KestraSessionSyncClient, type KestraSyncConfig, type SessionSnapshot } 
 export const name = 'kestra-sync'
 export const inject: string[] = []
 
-export interface Config extends KestraSyncConfig {}
+export interface Config extends KestraSyncConfig {
+  /** 批量队列磁盘持久化路径（默认 ~/.dsh/sync-queue.jsonl） */
+  queuePath?: string
+}
 
 export const Config: z<Config> = z.object({
   baseUrl: z.string().required(),
@@ -20,6 +23,7 @@ export const Config: z<Config> = z.object({
   mode: z.union(['realtime', 'batch']),
   batchIntervalMs: z.number(),
   timeoutMs: z.number(),
+  queuePath: z.string(),
 })
 
 export type * from './core.ts'

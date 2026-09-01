@@ -9,12 +9,15 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 
 export interface NacosConfigClientOptions {
   /** Nacos v3 控制台地址（API 与控制台同端口），e.g. http://nacos.internal:18480 */
   server: string
+  /** 配置磁盘缓存目录（默认 ~/.dsh/config-cache），Nacos 不可用时降级读取 */
+  cacheDir?: string
   /** v3 控制台登录用户（默认 nacos）；用于获取 accessToken */
   username?: string
   /** v3 控制台登录密码 */
@@ -67,10 +70,14 @@ export class NacosConfigClient {
   private readonly password: string
   private accessToken: string | undefined
 
+  private readonly cacheDir: string
+
   constructor(private readonly options: NacosConfigClientOptions, fetchImpl: typeof fetch = fetch) {
     this.fetchImpl = fetchImpl
     this.username = options.username ?? 'nacos'
     this.password = options.password ?? ''
+    this.cacheDir = options.cacheDir ?? join(homedir(), '.dsh', 'config-cache')
+    this.loadDiskCache()
     this.options = {
       namespace: 'dsh',
       group: DEFAULT_GROUP,
@@ -78,6 +85,36 @@ export class NacosConfigClient {
       dataIds: [...DEFAULT_DATA_IDS],
       ...options,
     }
+  }
+
+  /** 磁盘缓存路径：<cacheDir>/<namespace>/<group>/<dataId>.yaml（+ .md5）。 */
+  private diskPaths(dataId: string): { yaml: string; md5: string } {
+    const o = this.options
+    const dir = join(this.cacheDir, o.namespace ?? 'dsh', o.group ?? DEFAULT_GROUP)
+    return { yaml: join(dir, dataId + '.yaml'), md5: join(dir, dataId + '.yaml.md5') }
+  }
+
+  /** 启动时从磁盘缓存加载（Nacos 不可用时的降级数据源）。 */
+  private loadDiskCache(): void {
+    for (const dataId of this.options.dataIds ?? DEFAULT_DATA_IDS) {
+      const { yaml: yamlPath, md5: md5Path } = this.diskPaths(dataId)
+      if (!existsSync(yamlPath) || !existsSync(md5Path)) continue
+      try {
+        const raw = readFileSync(yamlPath, 'utf8')
+        const storedMd5 = readFileSync(md5Path, 'utf8').trim()
+        if (storedMd5 !== contentMd5(raw)) continue // 磁盘内容损坏/被篡改，跳过
+        this.cache.set(dataId, { md5: storedMd5, parsed: (yaml.load(raw) ?? {}) as unknown, raw })
+      } catch {
+        // 单个文件损坏不影响其余缓存
+      }
+    }
+  }
+
+  private persistToDisk(dataId: string, raw: string): void {
+    const { yaml: yamlPath, md5: md5Path } = this.diskPaths(dataId)
+    mkdirSync(yamlPath.substring(0, yamlPath.lastIndexOf('/')), { recursive: true })
+    writeFileSync(yamlPath, raw)
+    writeFileSync(md5Path, contentMd5(raw))
   }
 
   private configUrl(dataId: string): string {
@@ -104,18 +141,30 @@ export class NacosConfigClient {
     this.accessToken = data.accessToken
   }
 
-  /** Fetch one config (v3 console API), update the cache, and return the parsed document. */
+  /** Fetch one config (v3 console API), update memory + disk cache; degraded to disk on failure. */
   async fetchConfig<T = unknown>(dataId: string): Promise<T | undefined> {
-    await this.login()
-    const response = await this.fetchImpl(this.configUrl(dataId))
-    if (!response.ok) return undefined
-    const payload = (await response.json()) as { code?: number; data?: { content?: string; md5?: string } }
-    if (payload.code !== 0 || payload.data?.content === undefined) return undefined
-    const raw = payload.data.content
-    const md5 = payload.data.md5 ?? contentMd5(raw)
-    const parsed = (yaml.load(raw) ?? {}) as T
-    this.cache.set(dataId, { md5, parsed, raw })
-    return parsed
+    let raw: string | undefined
+    try {
+      await this.login()
+      const response = await this.fetchImpl(this.configUrl(dataId))
+      if (!response.ok) return undefined
+      const payload = (await response.json()) as { code?: number; data?: { content?: string; md5?: string } }
+      if (payload.code !== 0 || payload.data?.content === undefined) return undefined
+      raw = payload.data.content
+      const md5 = payload.data.md5 ?? contentMd5(raw)
+      const parsed = (yaml.load(raw) ?? {}) as T
+      this.cache.set(dataId, { md5, parsed, raw })
+      this.persistToDisk(dataId, raw)
+      return parsed
+    } catch {
+      // Nacos 不可用：从磁盘缓存降级加载（保持上次已知配置）
+      const { yaml: yamlPath } = this.diskPaths(dataId)
+      if (!existsSync(yamlPath)) return undefined
+      const cachedRaw = readFileSync(yamlPath, 'utf8')
+      const parsed = (yaml.load(cachedRaw) ?? {}) as T
+      this.cache.set(dataId, { md5: contentMd5(cachedRaw), parsed, raw: cachedRaw })
+      return parsed
+    }
   }
 
   getCached<T>(dataId: string): T | undefined {

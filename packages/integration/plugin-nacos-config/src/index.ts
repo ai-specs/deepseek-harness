@@ -11,13 +11,17 @@ import { NacosConfigClient, type NacosConfigClientOptions } from './core.ts'
 export const name = 'nacos-config'
 export const inject: string[] = []
 
-export interface Config extends NacosConfigClientOptions {}
+export interface Config extends NacosConfigClientOptions {
+  /** 配置磁盘缓存目录（默认 ~/.dsh/config-cache） */
+  cacheDir?: string
+}
 
 export const Config: z<Config> = z.object({
   server: z.string().required(),
   namespace: z.string().default('dsh'),
   group: z.string().default('DEFAULT_GROUP'),
   pollIntervalMs: z.number().default(10000),
+  cacheDir: z.string(),
 })
 
 export type * from './core.ts'
