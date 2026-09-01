@@ -148,11 +148,7 @@
     { "path": "./packages/core/scope" },
     { "path": "./packages/typert/protocol" },
     { "path": "./packages/typert/registry" },
-    { "path": "./packages/api/gateway/tsconfig.host.json" },
-    { "path": "./packages/api/remotes/tsconfig.host.json" },
-    { "path": "./packages/api/session-controller/tsconfig.host.json" },
     { "path": "./packages/api/settings-controller" },
-    { "path": "./packages/api/workspace-controller/tsconfig.host.json" },
     { "path": "./packages/typert/loader" },
     { "path": "./packages/session/session-persistence" },
     { "path": "./packages/session/session-checkpoint-policy" },
@@ -163,7 +159,6 @@
     { "path": "./packages/session/session-stats" },
     { "path": "./packages/session-query/session-query" },
     { "path": "./packages/session-query/session-query-sqlite" },
-    { "path": "./packages/session-query/session-log-export/tsconfig.host.json" },
     { "path": "./packages/settings/settings" },
     { "path": "./packages/settings/settings-file" },
     { "path": "./packages/credentials/credentials" },
@@ -280,7 +275,6 @@
     { "path": "./packages/test-support/loader-smoke" },
     { "path": "./packages/test-support/llm-mock-server" },
     { "path": "./packages/experimental/webworker-packer" },
-    { "path": "./packages/experimental/inspector/tsconfig.host.json" },
     { "path": "./packages/subagent/subagent" },
     { "path": "./packages/subagent/tool-subagent" },
     { "path": "./packages/subagent/tool-subagent-control" },
@@ -333,8 +327,6 @@
     { "path": "./packages/integration/plugin-nacos-config" },
     { "path": "./packages/guard/plugin-fault-tolerance" },
     { "path": "./packages/guard/plugin-runtime-guard" },
-    { "path": "./packages/llm/plugin-model-gateway" },
-    { "path": "./packages/context/plugin-context-manager" },
     { "path": "./apps/cli" }
   ]
 }
