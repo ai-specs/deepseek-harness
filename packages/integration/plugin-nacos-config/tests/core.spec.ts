@@ -16,9 +16,26 @@ const yamlContent = `skills:
       percent: 20
 `
 
+const CONFIG_PAYLOAD = {
+  code: 0,
+  data: { content: '', md5: 'test-md5' },
+}
+
 function clientWith(content: string | undefined, fetchImpl?: typeof fetch): NacosConfigClient {
-  const impl = fetchImpl ?? vi.fn().mockResolvedValue(new Response(content ?? 'config data not exist', { status: 200 }))
-  return new NacosConfigClient({ server: 'http://nacos.test', pollIntervalMs: 100000 }, impl as unknown as typeof fetch)
+  const impl = fetchImpl ?? vi.fn().mockImplementation(async (url: string | URL) => {
+    const target = String(url)
+    if (target.includes('/v3/auth/user/login')) {
+      return new Response(JSON.stringify({ accessToken: 'test-token' }), { status: 200 })
+    }
+    return new Response(
+      JSON.stringify({ code: 0, data: { content: content ?? '', md5: 'test-md5' } }),
+      { status: 200 },
+    )
+  })
+  return new NacosConfigClient(
+    { server: 'http://nacos.test', pollIntervalMs: 100000, username: 'nacos', password: 'test' },
+    impl as unknown as typeof fetch,
+  )
 }
 
 describe('skill gray rollout', () => {
@@ -43,10 +60,16 @@ describe('Nacos degradation (审查 9.2)', () => {
   it('keeps last known config when Nacos goes down', async () => {
     let failing = false
     const fetchImpl = vi.fn().mockImplementation(async (url: string | URL) => {
+      if (String(url).includes('/v3/auth/user/login')) {
+        return new Response(JSON.stringify({ accessToken: 't' }), { status: 200 })
+      }
       if (failing) throw new Error('connect timeout')
-      return new Response('window:\n  maxMessages: 40', { status: 200 })
+      return new Response(JSON.stringify({ code: 0, data: { content: 'window:\n  maxMessages: 40', md5: 'm' } }), { status: 200 })
     })
-    const client = new NacosConfigClient({ server: 'http://nacos.test', pollIntervalMs: 50 }, fetchImpl as unknown as typeof fetch)
+    const client = new NacosConfigClient(
+      { server: 'http://nacos.test', pollIntervalMs: 50, username: 'nacos', password: 'p' },
+      fetchImpl as unknown as typeof fetch,
+    )
     await client.fetchConfig('dsh-context.yaml')
     expect(client.getCached<any>('dsh-context.yaml')?.window?.maxMessages).toBe(40)
     failing = true
@@ -69,10 +92,20 @@ describe('NacosConfigClient', () => {
   })
 
   it('respects gray percent when syncing skill packages', async () => {
-    const fetchSpy = vi.fn()
-      .mockResolvedValueOnce(new Response(yamlContent, { status: 200 }))
-      .mockResolvedValue(new Response('PK', { status: 200 }))
-    const client = new NacosConfigClient({ server: 'http://nacos.test' }, fetchSpy as unknown as typeof fetch)
+    const fetchSpy = vi.fn().mockImplementation(async (url: string | URL) => {
+      const target = String(url)
+      if (target.includes('/v3/auth/user/login')) {
+        return new Response(JSON.stringify({ accessToken: 't' }), { status: 200 })
+      }
+      if (target.includes('/v3/console/cs/config')) {
+        return new Response(JSON.stringify({ code: 0, data: { content: yamlContent, md5: 'x' } }), { status: 200 })
+      }
+      return new Response('PK', { status: 200 })
+    })
+    const client = new NacosConfigClient(
+      { server: 'http://nacos.test', username: 'nacos', password: 'p' },
+      fetchSpy as unknown as typeof fetch,
+    )
     const results = await client.syncSkillPackages('/tmp/dsh-test-skills', 50)
     const byName = new Map(results.map(r => [r.name, r]))
     expect(byName.get('expense-report')?.cached).toBe(true)   // stable 全量
