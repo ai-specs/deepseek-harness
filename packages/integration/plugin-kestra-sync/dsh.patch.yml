@@ -1,0 +1,4 @@
+# dsh 插件 bundle：注入 kestra-sync 到 Cordis 入口树
+- insert:
+    - id: kestra-sync
+      name: '@deepseek-ai/dsh-plugin-kestra-sync'

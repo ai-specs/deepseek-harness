@@ -6,8 +6,14 @@
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
   "exports": {
-    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
-    "./core": { "types": "./lib/types/core.d.ts", "default": "./lib/core.js" },
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./core": {
+      "types": "./lib/types/core.d.ts",
+      "default": "./lib/core.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
@@ -18,5 +24,10 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./dsh.patch.yml"
+    }
   }
 }
