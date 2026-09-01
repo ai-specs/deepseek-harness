@@ -5,6 +5,8 @@
 # contract the io.kestra.plugin.dsh.agent.AIAgent task drives:
 #   - DSH_MODEL / DSH_PROVIDER select the model without editing config files;
 #   - DSH_TOOLS (comma-separated) becomes a deny-by-default tool allowlist;
+#   - DSH_MAX_ITERATIONS bounds the ReAct turn budget (tool calls beyond it are
+#     denied with a wrap-up instruction, so the turn still closes with an answer);
 #   - DSH_OUTPUT_FILE receives the structured result JSON the Java task reads;
 #   - DSH_TIMEOUT bounds the process (the observer exits 124 on expiry).
 #
@@ -24,4 +26,5 @@
       config:
         resultFile: !!js (process.env.DSH_OUTPUT_FILE || '/result.json')
         allowTools: !!js ((process.env.DSH_TOOLS && process.env.DSH_TOOLS.split(',').map(s => s.trim()).filter(Boolean)) || undefined)
+        maxIterations: !!js (Number(process.env.DSH_MAX_ITERATIONS) || 0)
         timeoutSeconds: !!js (Number(process.env.DSH_TIMEOUT) || 0)

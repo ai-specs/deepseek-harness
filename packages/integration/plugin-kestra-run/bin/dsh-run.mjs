@@ -52,6 +52,7 @@ const overlay = [
   '      config:',
   "        resultFile: !!js (process.env.DSH_OUTPUT_FILE || '/result.json')",
   '        allowTools: !!js ((process.env.DSH_TOOLS && process.env.DSH_TOOLS.split(\',\').map(s => s.trim()).filter(Boolean)) || undefined)',
+  '        maxIterations: !!js (Number(process.env.DSH_MAX_ITERATIONS) || 0)',
   '        timeoutSeconds: !!js (Number(process.env.DSH_TIMEOUT) || 0)',
   '',
 ].join('\n')

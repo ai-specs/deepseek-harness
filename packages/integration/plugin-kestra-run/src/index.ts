@@ -33,12 +33,19 @@ export interface Config {
   allowTools?: string[]
   /** Wall-clock bound in seconds; 0 = unbounded. On expiry the partial result is written and the process exits 124. */
   timeoutSeconds?: number
+  /**
+   * ReAct turn budget (0 = unbounded). Once a NEW turn opens beyond the
+   * budget, tool calls are denied with a wrap-up instruction, so the model
+   * still closes the turn with its best final answer instead of being killed.
+   */
+  maxIterations?: number
 }
 
 export const Config: z<Config> = z.object({
   resultFile: z.string().required(),
   allowTools: z.array(z.string()),
   timeoutSeconds: z.number(),
+  maxIterations: z.number(),
 })
 
 /** The structured result contract (mirrors io.kestra.plugin.dsh.agent.AIAgent.RunResult). */
@@ -56,6 +63,8 @@ export interface RunResultPayload {
 /** Running tallies for one observed process (a one-shot run owns one agent). */
 export interface RunTallies {
   turns: Set<number>
+  /** The most recently opened turn — the iteration-budget guard reads it live. */
+  currentTurn: number
   toolCalls: number
   toolErrors: number
   promptTokens: number
@@ -69,6 +78,7 @@ export interface RunTallies {
 export function createTallies(startedAt = Date.now()): RunTallies {
   return {
     turns: new Set<number>(),
+    currentTurn: 0,
     toolCalls: 0,
     toolErrors: 0,
     promptTokens: 0,
@@ -85,6 +95,7 @@ export function observeEvent(tallies: RunTallies, event: SessionEvent): void {
   switch (event.type) {
     case 'turn/start':
       tallies.turns.add(event.data.turn)
+      tallies.currentTurn = event.data.turn
       return
     case 'tool/call':
       tallies.toolCalls += 1
@@ -141,8 +152,9 @@ export function projectResult(tallies: RunTallies, timedOut = false): RunResultP
 
 /**
  * Mount the observer: subscribe to the Session feed, install the tool
- * allowlist guard, and arm the timeout. The upstream headless runner owns
- * stdout and the exit code; this plugin only adds the AIAgent file contract.
+ * allowlist and iteration-budget guards, and arm the timeout. The upstream
+ * headless runner owns stdout and the exit code; this plugin only adds the
+ * AIAgent file contract.
  */
 export function apply(ctx: Context, config: Config): void {
   const tallies = createTallies()
@@ -161,16 +173,28 @@ export function apply(ctx: Context, config: Config): void {
     if (event.type === 'turn/end') write()
   })
 
-  if (config.allowTools && config.allowTools.length > 0) {
-    const allowed = new Set(config.allowTools)
-    ctx.on('tools/pre-execute', (exec, next) => {
-      if (allowed.has(exec.name)) return next()
+  const allowGuard = config.allowTools && config.allowTools.length > 0
+    ? new Set(config.allowTools)
+    : undefined
+  const turnBudget = config.maxIterations ?? 0
+  ctx.on('tools/pre-execute', (exec, next) => {
+    // Iteration budget first: a turn opened beyond DSH_MAX_ITERATIONS gets its
+    // tool calls denied with a wrap-up instruction, so the model still closes
+    // the turn with its best final answer instead of being killed mid-flight.
+    if (turnBudget > 0 && tallies.currentTurn > turnBudget) {
       return Promise.resolve({
         kind: 'deny',
-        reason: `kestra-run: tool "${exec.name}" is not in the DSH_TOOLS allowlist (${[...allowed].join(', ')})`,
+        reason: `kestra-run: DSH_MAX_ITERATIONS=${String(turnBudget)} budget exhausted (turn ${String(tallies.currentTurn)}); wrap up now with your best final answer from the information you already have`,
       })
-    })
-  }
+    }
+    if (allowGuard !== undefined && !allowGuard.has(exec.name)) {
+      return Promise.resolve({
+        kind: 'deny',
+        reason: `kestra-run: tool "${exec.name}" is not in the DSH_TOOLS allowlist (${[...allowGuard].join(', ')})`,
+      })
+    }
+    return next()
+  })
 
   const timeoutSeconds = config.timeoutSeconds ?? 0
   if (timeoutSeconds > 0) {
