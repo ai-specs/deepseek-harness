@@ -1,0 +1,27 @@
+# Kestra AIAgent execution-plane overlay (dsh.docx 第二种运行位置).
+#
+# Applied on top of the headless profile (`dsh --profile headless --patch
+# …/dsh.patch.yml "<task>"`), it turns the one-shot run into the container
+# contract the io.kestra.plugin.dsh.agent.AIAgent task drives:
+#   - DSH_MODEL / DSH_PROVIDER select the model without editing config files;
+#   - DSH_TOOLS (comma-separated) becomes a deny-by-default tool allowlist;
+#   - DSH_OUTPUT_FILE receives the structured result JSON the Java task reads;
+#   - DSH_TIMEOUT bounds the process (the observer exits 124 on expiry).
+#
+# The overlay inserts ONE row and patches ONE existing row — no upstream
+# plugin file is modified. NOTE: keep the !!js expressions single-line (the
+# patch YAML parser rejects multi-line scalars). bin/dsh-run.mjs generates the
+# same overlay with an absolute file-URL plugin name — keep both in sync.
+
+- id: agent-default-model
+  config:
+    provider: !!js process.env.DSH_PROVIDER || 'deepseek-official'
+    model: !!js process.env.DSH_MODEL || 'deepseek-v4-flash'
+
+- insert:
+    - id: kestra-run
+      name: '@deepseek-ai/dsh-plugin-kestra-run'
+      config:
+        resultFile: !!js (process.env.DSH_OUTPUT_FILE || '/result.json')
+        allowTools: !!js ((process.env.DSH_TOOLS && process.env.DSH_TOOLS.split(',').map(s => s.trim()).filter(Boolean)) || undefined)
+        timeoutSeconds: !!js (Number(process.env.DSH_TIMEOUT) || 0)

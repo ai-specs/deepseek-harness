@@ -325,6 +325,7 @@
     { "path": "./packages/lsp/tool-lsp" },
     { "path": "./packages/integration/plugin-kestra-sync" },
     { "path": "./packages/integration/plugin-nacos-config" },
+    { "path": "./packages/integration/plugin-kestra-run" },
     { "path": "./packages/guard/plugin-fault-tolerance" },
     { "path": "./packages/guard/plugin-runtime-guard" },
     { "path": "./apps/cli" }
