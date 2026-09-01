@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildSyncRequest, KestraSessionSyncClient, type KestraSyncConfig } from '../src/core.ts'
+import { buildSyncRequest, buildTokenRequest, KestraSessionSyncClient, type KestraSyncConfig } from '../src/core.ts'
 
 const config: KestraSyncConfig = {
   baseUrl: 'http://kestra.internal:8080/',
@@ -23,6 +23,46 @@ describe('buildSyncRequest', () => {
     const body = JSON.parse(String(init.body))
     expect(body.phase).toBe('running')
     expect(body.at).toBeTruthy()
+  })
+})
+
+describe('OIDC client_credentials (dsh API Bearer)', () => {
+  it('builds the token request against the same provider', () => {
+    const { url, init } = buildTokenRequest({
+      baseUrl: 'http://kestra.internal:8080/',
+      clientId: 'dsh',
+      clientSecret: 's3cret',
+    })
+    expect(url).toBe('http://kestra.internal:8080/oidc/token')
+    expect(init.method).toBe('POST')
+    expect(String(init.body)).toBe('grant_type=client_credentials')
+    const auth = (init.headers as Record<string, string>).Authorization
+    expect(auth).toBe(`Basic ${Buffer.from('dsh:s3cret').toString('base64')}`)
+  })
+
+  it('fetches, caches, and force-refreshes the access token on 401', async () => {
+    let issued = 0
+    const fetchImpl = vi.fn().mockImplementation(async (url: unknown) => {
+      if (String(url).endsWith('/oidc/token')) {
+        issued += 1
+        return new Response(JSON.stringify({ access_token: `tok-${issued}`, expires_in: 3600 }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      // 会话推送固定 401（验证取票+强制刷新被触发）
+      return new Response(null, { status: 401 })
+    })
+    const client = new KestraSessionSyncClient(
+      { baseUrl: 'http://kestra:8080', clientId: 'dsh', clientSecret: 's3cret' },
+      fetchImpl as unknown as typeof fetch,
+    )
+    const r1 = await client.push({ sessionId: 'cc-1', phase: 'running' })
+    expect(r1?.status).toBe(401)
+    expect(issued).toBe(2) // initial fetch + forced refresh on 401
+  })
+
+  it('rejects construction without any credential source', () => {
+    expect(() => new KestraSessionSyncClient({ baseUrl: 'http://kestra:8080' }))
+      .toThrow('clientId+clientSecret')
   })
 })
 

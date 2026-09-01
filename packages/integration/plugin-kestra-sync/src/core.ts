@@ -16,8 +16,15 @@ export interface KestraSyncConfig {
   baseUrl: string
   /** 批量队列磁盘持久化路径（默认 ~/.dsh/sync-queue.jsonl），重启后待同步快照不丢 */
   queuePath?: string
-  /** Bearer token for the Kestra API gateway */
-  token: string
+  /**
+   * Bearer token for the dsh APIs — an access token issued by the Kestra OIDC
+   * provider. Optional when clientId/clientSecret are given: the client then
+   * fetches and refreshes one itself (client_credentials grant).
+   */
+  token?: string
+  /** OIDC client for the client_credentials grant (the seeded `dsh` client). */
+  clientId?: string
+  clientSecret?: string
   /** Tenant used for the API path (Kestra 2.x multi-tenancy) */
   tenant?: string
   /** realtime pushes immediately; batch coalesces snapshots per interval */
@@ -55,6 +62,7 @@ export interface PushResult {
 export function buildSyncRequest(
   config: KestraSyncConfig,
   snapshot: SessionSnapshot,
+  token = config.token ?? '',
 ): { url: string; init: RequestInit } {
   const url = `${config.baseUrl.replace(/\/+$/, '')}/api/v1/dsh/sessions/${encodeURIComponent(snapshot.sessionId)}`
   const body = { ...snapshot, at: snapshot.at ?? new Date().toISOString() }
@@ -64,9 +72,27 @@ export function buildSyncRequest(
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.token}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(config.timeoutMs ?? 5000),
+    },
+  }
+}
+
+/** Builds the client_credentials token request against the same OIDC provider — pure, unit-testable. */
+export function buildTokenRequest(config: KestraSyncConfig): { url: string; init: RequestInit } {
+  const url = `${config.baseUrl.replace(/\/+$/, '')}/oidc/token`
+  const basic = Buffer.from(`${config.clientId}:${config.clientSecret}`, 'utf8').toString('base64')
+  return {
+    url,
+    init: {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${basic}`,
+      },
+      body: 'grant_type=client_credentials',
       signal: AbortSignal.timeout(config.timeoutMs ?? 5000),
     },
   }
@@ -80,14 +106,39 @@ export class KestraSessionSyncClient {
 
   private readonly queuePath: string
 
+  /** Cached client_credentials token; refreshed 60s before expiry. */
+  private cachedToken: { value: string; expiresAt: number } | undefined
+
   constructor(
     private readonly config: KestraSyncConfig,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly now: () => number = Date.now,
   ) {
+    if (config.token === undefined && (config.clientId === undefined || config.clientSecret === undefined)) {
+      throw new Error('kestra-sync: either token or clientId+clientSecret is required')
+    }
     this.queuePath = config.queuePath ?? join(homedir(), '.dsh', 'sync-queue.jsonl')
     this.loadQueueFromDisk()
     // 批量定时器惰性启动：首次 enqueue 才出现
+  }
+
+  /** The effective Bearer token: the configured one, or a cached client_credentials token. */
+  private async bearerToken(forceRefresh = false): Promise<string> {
+    if (this.config.token !== undefined) return this.config.token
+    if (!forceRefresh
+      && this.cachedToken !== undefined
+      && this.cachedToken.expiresAt > this.now() + 60_000) {
+      return this.cachedToken.value
+    }
+    const { url, init } = buildTokenRequest(this.config)
+    const response = await this.fetchImpl(url, init)
+    if (!response.ok) {
+      throw new Error(`kestra-sync: token fetch failed (${String(response.status)})`)
+    }
+    const payload = await response.json() as { access_token: string; expires_in?: number }
+    const ttlMs = (payload.expires_in ?? 3600) * 1000
+    this.cachedToken = { value: payload.access_token, expiresAt: this.now() + ttlMs }
+    return this.cachedToken.value
   }
 
   /** 队列磁盘持久化：每次变更后全量重写（JSONL，每行一个快照）。 */
@@ -150,9 +201,23 @@ export class KestraSessionSyncClient {
   }
 
   private async send(snapshot: SessionSnapshot, attempt = 1): Promise<PushResult> {
-    const { url, init } = buildSyncRequest(this.config, snapshot)
+    let token: string
+    try {
+      token = await this.bearerToken(attempt > 1)
+    } catch {
+      if ((this.config.mode ?? 'realtime') === 'batch' && this.queue.length < 1000) {
+        this.queue.push(snapshot)
+        this.persistQueue()
+      }
+      return { ok: false, status: 0, sessionId: snapshot.sessionId, phase: snapshot.phase }
+    }
+    const { url, init } = buildSyncRequest(this.config, snapshot, token)
     try {
       const response = await this.fetchImpl(url, init)
+      // 过期/撤销的 client_credentials token：强制刷新后重试一次
+      if (response.status === 401 && this.config.token === undefined && attempt < 2) {
+        return this.send(snapshot, attempt + 1)
+      }
       return { ok: response.ok, status: response.status, sessionId: snapshot.sessionId, phase: snapshot.phase }
     } catch {
       // dsh 是主动外连侧：传输失败不阻塞 Agent。batch 模式下重新入队

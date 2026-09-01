@@ -18,7 +18,10 @@ export interface Config extends KestraSyncConfig {
 
 export const Config: z<Config> = z.object({
   baseUrl: z.string().required(),
-  token: z.string().required(),
+  // 二选一：静态 access token，或 clientId+clientSecret 走 client_credentials 自动取票
+  token: z.string(),
+  clientId: z.string(),
+  clientSecret: z.string(),
   tenant: z.string(),
   mode: z.union(['realtime', 'batch']),
   batchIntervalMs: z.number(),
@@ -27,7 +30,7 @@ export const Config: z<Config> = z.object({
 })
 
 export type * from './core.ts'
-export { KestraSessionSyncClient, buildSyncRequest } from './core.ts'
+export { KestraSessionSyncClient, buildSyncRequest, buildTokenRequest } from './core.ts'
 
 /** Started client handle kept on the plugin context for dispose. */
 export function apply(ctx: Context, config: Config): KestraSessionSyncClient {
