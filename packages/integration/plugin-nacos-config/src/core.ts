@@ -16,6 +16,17 @@ import yaml from 'js-yaml'
 export interface NacosConfigClientOptions {
   /** Nacos v3 控制台地址（API 与控制台同端口），e.g. http://nacos.internal:18480 */
   server: string
+  /**
+   * 认证模式：`oidc`（默认，Nacos auth system=oidc 时唯一可用——本地账密登录已禁用，
+   * 用 Kestra OIDC 的 client_credentials 票据）或 `local`（传统 nacos 账密登录）。
+   */
+  auth?: 'oidc' | 'local'
+  /** auth=oidc：Kestra OIDC token 端点（容器内 http://kestra:8080/oidc/token）。 */
+  oidcTokenUrl?: string
+  /** auth=oidc：client_credentials 的客户端（种子化 nacos 客户端）。 */
+  clientId?: string
+  /** auth=oidc：client_credentials 密钥。 */
+  clientSecret?: string
   /** 配置磁盘缓存目录（默认 ~/.dsh/config-cache），Nacos 不可用时降级读取 */
   cacheDir?: string
   /** v3 控制台登录用户（默认 nacos）；用于获取 accessToken */
@@ -33,12 +44,12 @@ export interface NacosConfigClientOptions {
 }
 
 export const DEFAULT_DATA_IDS = [
-  'dsh-model-gateway.yaml',
   'dsh-tools.yaml',
   'dsh-permission.yaml',
   'dsh-fault-tolerance.yaml',
   'dsh-context.yaml',
   'dsh-skills.yaml',
+  'dsh-prompt.yaml',
 ] as const
 
 export const DEFAULT_GROUP = 'DEFAULT_GROUP'
@@ -127,9 +138,26 @@ export class NacosConfigClient {
     })
   }
 
-  /** v3 console 登录，缓存 accessToken。 */
+  /** v3 console 登录，缓存 accessToken（oidc=Kestra client_credentials；local=账密）。 */
   private async login(): Promise<void> {
     if (this.accessToken) return
+    if ((this.options.auth ?? 'oidc') === 'oidc') {
+      const tokenUrl = this.options.oidcTokenUrl
+        ?? new URL('/oidc/token', this.options.server.replace(/\/v3$/, '').replace(/\/?$/, '')).href
+      const basic = Buffer.from(`${this.options.clientId ?? 'nacos'}:${this.options.clientSecret ?? 'nacos-secret-change-me'}`, 'utf8').toString('base64')
+      const response = await this.fetchImpl(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${basic}`,
+        },
+        body: 'grant_type=client_credentials',
+      })
+      if (!response.ok) throw new Error(`oidc token fetch failed: HTTP ${response.status}`)
+      const data = (await response.json()) as { access_token?: string }
+      this.accessToken = data.access_token
+      return
+    }
     const loginUrl = `${this.options.server.replace(/\/+$/, '')}/v3/auth/user/login`
     const response = await this.fetchImpl(loginUrl, {
       method: 'POST',
