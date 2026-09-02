@@ -52,6 +52,6 @@ describe('队列磁盘持久化（审查任务 1.3）', () => {
     }
     const lines = readFileSync(join(queueDir, 'q.jsonl'), 'utf8').trim().split('\n')
     expect(lines).toHaveLength(1000)
-    expect(JSON.parse(lines[0]).sessionId).toBe('s-1') // 最旧的 s-0 被丢弃
+    expect(JSON.parse(lines[0]!).sessionId).toBe('s-1') // 最旧的 s-0 被丢弃
   })
 })

@@ -122,11 +122,11 @@ describe('PkceTokenProvider', () => {
     expect(tokens.sub).toBe('alice@kestra.io')
     expect(seenAuthorize).toHaveLength(1)
     // 换票请求是公开客户端形态：client_id 在 body，无 Basic 头
-    const body = bodies[0]
+    const body = bodies[0]!
     expect(body.get('grant_type')).toBe('authorization_code')
     expect(body.get('code')).toBe('auth-code-1')
     expect(body.get('code_verifier')).toMatch(/^[A-Za-z0-9_-]{43}$/)
-    const init = fetchImpl.mock.calls[0][1] as RequestInit
+    const init = fetchImpl.mock.calls[0]![1] as RequestInit
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
     // 缓存落盘（0600）
     const cached = JSON.parse(readFileSync(testConfig().cachePath!, 'utf8'))
