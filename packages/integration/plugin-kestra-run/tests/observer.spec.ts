@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { ToolCallId, createAssistantMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 
 import { apply, createTallies, name, observeEvent, projectResult } from '../src/index.ts'
 
@@ -19,9 +20,9 @@ function event<T extends SessionEvent['type']>(
 
 /** A Context double that just captures event listeners for later invocation. */
 function captureContext() {
-  const listeners = new Map<string, (...args: never[]) => unknown>()
+  const listeners = new Map<string, (...args: unknown[]) => unknown>()
   const ctx = {
-    on: vi.fn((event: string, listener: (...args: never[]) => unknown) => {
+    on: vi.fn((event: string, listener: (...args: unknown[]) => unknown) => {
       listeners.set(event, listener)
       return () => { listeners.delete(event) }
     }),
@@ -40,22 +41,32 @@ describe('kestra-run observer', () => {
   it('counts turns, tool calls, tool errors, and token usage', () => {
     const tallies = createTallies(1_000)
     observeEvent(tallies, event('turn/start', { turn: 0 }))
-    observeEvent(tallies, event('tool/call', { turn: 0, step: 0, callId: 'c1', name: 'fs/read', arguments: '{}' }))
-    observeEvent(tallies, event('tool/result', { turn: 0, step: 0, message: { role: 'tool', content: [] } }))
-    observeEvent(tallies, event('tool/call', { turn: 0, step: 1, callId: 'c2', name: 'web/search', arguments: '{}' }))
+    observeEvent(tallies, event('tool/call', { turn: 0, step: 0, callId: ToolCallId('c1'), name: 'fs/read', arguments: '{}' }))
     observeEvent(tallies, event('tool/result', {
-      turn: 0, step: 1, message: { role: 'tool', content: [] },
+      turn: 0, step: 0,
+      message: createToolResultMessage({ callId: ToolCallId('c1'), content: [], isError: false }),
+    }))
+    observeEvent(tallies, event('tool/call', { turn: 0, step: 1, callId: ToolCallId('c2'), name: 'web/search', arguments: '{}' }))
+    observeEvent(tallies, event('tool/result', {
+      turn: 0, step: 1,
+      message: createToolResultMessage({ callId: ToolCallId('c2'), content: [], isError: true }),
       error: { name: 'ToolError', code: 'FETCH_FAILED' },
     }))
     observeEvent(tallies, event('assistant/message', {
       turn: 0, step: 1,
-      message: { role: 'assistant', content: [{ type: 'text', text: '中间答复' }] },
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: '中间答复' }],
+        source: { provider: 'mock', model: 'mock-model' },
+      }),
       usage: { inputTokens: 100, outputTokens: 20 },
     }))
     observeEvent(tallies, event('turn/start', { turn: 1 }))
     observeEvent(tallies, event('assistant/message', {
       turn: 1, step: 0,
-      message: { role: 'assistant', content: [{ type: 'text', text: '最终答复' }] },
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: '最终答复' }],
+        source: { provider: 'mock', model: 'mock-model' },
+      }),
       usage: { inputTokens: 200, outputTokens: 50, totalTokens: 370 },
     }))
     observeEvent(tallies, event('turn/end', { turn: 1, reason: { kind: 'completed' } }))
@@ -75,7 +86,10 @@ describe('kestra-run observer', () => {
     observeEvent(tallies, event('turn/start', { turn: 0 }))
     observeEvent(tallies, event('assistant/message', {
       turn: 0, step: 0,
-      message: { role: 'assistant', content: [{ type: 'text', text: '部分输出' }] },
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: '部分输出' }],
+        source: { provider: 'mock', model: 'mock-model' },
+      }),
     }))
     observeEvent(tallies, event('turn/end', {
       turn: 0,
@@ -103,7 +117,10 @@ describe('kestra-run observer', () => {
     observeEvent(tallies, event('turn/start', { turn: 0 }))
     observeEvent(tallies, event('assistant/message', {
       turn: 0, step: 0,
-      message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: 'hello' }],
+        source: { provider: 'mock', model: 'mock-model' },
+      }),
     }))
 
     writeFileSync(file, JSON.stringify(projectResult(tallies)))
