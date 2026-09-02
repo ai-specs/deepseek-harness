@@ -6156,6 +6156,10 @@ importers:
         version: link:../../../vendor/schemastery
 
   packages/integration/plugin-kestra-sync:
+    dependencies:
+      '@deepseek-ai/dsh-util-crypto':
+        specifier: workspace:^
+        version: link:../../util/crypto
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
