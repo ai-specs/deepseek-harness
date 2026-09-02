@@ -29,5 +29,12 @@
     "bundle": {
       "patch": "./dsh.patch.yml"
     }
+  },
+  "bin": {
+    "dsh-kestra-login": "bin/dsh-kestra-login.mjs",
+    "dsh-kestra-daemon": "bin/dsh-kestra-daemon.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-util-crypto": "workspace:^"
   }
 }
