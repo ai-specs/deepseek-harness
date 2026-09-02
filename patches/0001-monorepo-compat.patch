@@ -22,7 +22,7 @@ diff --git a/tsconfig.host.json b/tsconfig.host.json
 index 2d9dc3513c..6145cefb9b 100644
 --- a/tsconfig.host.json
 +++ b/tsconfig.host.json
-@@ -329,6 +329,12 @@
+@@ -329,6 +329,10 @@
      { "path": "./packages/lsp/lsp" },
      { "path": "./packages/lsp/lsp-stdio" },
      { "path": "./packages/lsp/tool-lsp" },
@@ -30,8 +30,6 @@ index 2d9dc3513c..6145cefb9b 100644
 +    { "path": "./packages/integration/plugin-nacos-config" },
 +    { "path": "./packages/guard/plugin-fault-tolerance" },
 +    { "path": "./packages/guard/plugin-runtime-guard" },
-+    { "path": "./packages/llm/plugin-model-gateway" },
-+    { "path": "./packages/context/plugin-context-manager" },
      { "path": "./apps/cli" }
    ]
  }
