@@ -156,7 +156,7 @@ describe('PkceTokenProvider', () => {
     expect(provider.currentSub()).toBe('alice@kestra.io')
     const token = await provider.getToken()
     expect(token).toBe('at-2')
-    const body = bodies[0]
+    const body = bodies[0]!
     expect(body.get('grant_type')).toBe('refresh_token')
     expect(body.get('refresh_token')).toBe('rt-old')
     expect(body.get('client_id')).toBe('dsh-pc')
@@ -234,11 +234,11 @@ describe('remote input consumption (dsh.docx PC 离线行为)', () => {
     expect(inputs).toHaveLength(1)
     const target = decideInputTarget({ sessionId: 'done-1', phase: 'COMPLETED' })
     if (target.kind === 'fork') {
-      await client.push({ sessionId: target.newSessionId, phase: 'running', state: JSON.stringify({ prompt: inputs[0].text }) })
+      await client.push({ sessionId: target.newSessionId, phase: 'running', state: JSON.stringify({ prompt: inputs[0]!.text }) })
       pushed.push({ sessionId: target.newSessionId })
     }
     expect(target.kind).toBe('fork')
-    expect(pushed[0].sessionId).toMatch(/[0-9a-f-]{36}/)
+    expect(pushed[0]!.sessionId).toMatch(/[0-9a-f-]{36}/)
     client.dispose()
   })
 })

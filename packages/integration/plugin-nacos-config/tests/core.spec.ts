@@ -16,10 +16,6 @@ const yamlContent = `skills:
       percent: 20
 `
 
-const CONFIG_PAYLOAD = {
-  code: 0,
-  data: { content: '', md5: 'test-md5' },
-}
 
 function clientWith(content: string | undefined, fetchImpl?: typeof fetch): NacosConfigClient {
   const impl = fetchImpl ?? vi.fn().mockImplementation(async (url: string | URL) => {
