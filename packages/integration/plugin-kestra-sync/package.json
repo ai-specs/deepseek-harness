@@ -36,5 +36,8 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-util-crypto": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-session": "workspace:^"
   }
 }

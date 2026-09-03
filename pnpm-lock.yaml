@@ -6163,16 +6163,16 @@ importers:
 
   packages/integration/plugin-kestra-sync:
     dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
       '@deepseek-ai/dsh-util-crypto':
         specifier: workspace:^
         version: link:../../util/crypto
     devDependencies:
-      '@deepseek-ai/cordis':
+      '@deepseek-ai/dsh-session':
         specifier: workspace:^
-        version: link:../../../vendor/cordis
-      '@deepseek-ai/schemastery':
-        specifier: link:../../../vendor/schemastery
-        version: link:../../../vendor/schemastery
+        version: link:../../core/session
 
   packages/integration/plugin-nacos-config:
     dependencies:

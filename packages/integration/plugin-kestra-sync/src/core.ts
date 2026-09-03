@@ -391,3 +391,119 @@ export class KestraSessionSyncClient {
     this.stopInputPoller()
   }
 }
+
+// ---------------------------------------------------------------- session mirror
+
+/** 结构化最小的本地会话视图（core Session 的镜像面；不反向依赖 @deepseek-ai/dsh-session）。 */
+export interface MirrorSession {
+  readonly id: string
+  readonly header: { parentSession?: string }
+  deriveMessages?(): ReadonlyArray<{ role: string; content: unknown }>
+  /** 规范事件日志（created/恢复通告从末尾推导真实阶段用）。 */
+  events?: ReadonlyArray<{ type: string; data?: unknown }>
+}
+
+/** 会话生命周期事件 → 同步阶段。`turn/end` 按 reason.kind 区分 FAILED/COMPLETED；其余事件不推送。 */
+export function deriveSyncPhase(eventType: string, reasonKind?: string): SessionPhase | undefined {
+  if (eventType === 'session/created' || eventType === 'turn/start') return 'running'
+  if (eventType === 'turn/end') return reasonKind === 'error' ? 'failed' : 'completed'
+  return undefined
+}
+
+/** 由消息列表折叠镜像 state：prompt=首条用户文本，result=末条助手文本（手机端列表摘要/详情页直接消费）。 */
+export function foldSyncState(
+  messages: ReadonlyArray<{ role: string; content: unknown }>,
+): { prompt?: string; result?: string } {
+  let prompt: string | undefined
+  let result: string | undefined
+  for (const message of messages) {
+    const text = textBlocksOf(message.content)
+    if (text === undefined) continue
+    if (message.role === 'user' && prompt === undefined) prompt = text
+    if (message.role === 'assistant') result = text
+  }
+  return {
+    ...(prompt === undefined ? {} : { prompt }),
+    ...(result === undefined ? {} : { result }),
+  }
+}
+
+/** 拼接 content 的 text 块；无可见文本返回 undefined（工具调用/纯 reasoning 消息不产生摘要）。 */
+function textBlocksOf(content: unknown): string | undefined {
+  const blocks = typeof content === 'string'
+    ? [content]
+    : Array.isArray(content)
+      ? content.map(block =>
+        typeof block === 'object' && block !== null && (block as { type?: unknown }).type === 'text'
+          ? String((block as { text?: unknown }).text ?? '')
+          : '')
+      : []
+  const text = blocks.join('').trim()
+  return text === '' ? undefined : text
+}
+
+/** Kestra dsh_session.id 是 uuid 列（`?::uuid` 强校验）。本地 `session-<uuid>` 剥前缀上线；其余形态无法落库。 */
+export function wireSessionId(localId: string): string | undefined {
+  const bare = localId.startsWith('session-') ? localId.slice('session-'.length) : localId
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bare) ? bare : undefined
+}
+
+/** 从事件日志末尾推导会话当前阶段：最后一条 turn 边决定（恢复/进程重启后的 created 通告走这里）。 */
+export function deriveSessionPhaseFromLog(
+  events: ReadonlyArray<{ type: string; data?: unknown }>,
+): SessionPhase {
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index]
+    if (event === undefined) continue
+    if (event.type === 'turn/end') {
+      const kind = (event.data as { reason?: { kind?: string } } | undefined)?.reason?.kind
+      return deriveSyncPhase('turn/end', kind) ?? 'completed'
+    }
+    if (event.type === 'turn/start') return 'running'
+  }
+  return 'running'
+}
+
+/**
+ * 本地会话 → Kestra dsh_session 镜像器：PC 端创建的会话推快照，手机端同 sub 即可见
+ * （dsh.docx 跨端同步；归属 owner 由服务端按 token sub 强制绑定）。本地 id 按
+ * `session-<uuid>` → 裸 uuid 映射上线（Kestra 列强校验 UUID）。只镜像主线会话
+ * （fork 派生的 subagent 会话不镜像）；终态推送一次后冻结 —— Kestra 状态机无终态出边，
+ * 已完结会话的延续由手机输入接力 fork 新会话承担。
+ */
+export class SessionMirror {
+  private readonly terminal = new Set<string>()
+
+  constructor(private readonly client: Pick<KestraSessionSyncClient, 'push' | 'currentSub'>) {}
+
+  /** `session/created` 观测入口：新会话与重启恢复的会话都经此发布；阶段按日志末尾推导。 */
+  onCreated(session: MirrorSession): void {
+    void this.mirror(session, deriveSessionPhaseFromLog(session.events ?? []))
+  }
+
+  /** `session/event` 观测入口：turn/start、turn/end 驱动阶段迁移。 */
+  onEvent(session: MirrorSession, event: { type: string; data?: unknown }): void {
+    const reason = (event.data as { reason?: { kind?: string } } | undefined)?.reason
+    void this.mirror(session, deriveSyncPhase(event.type, reason?.kind))
+  }
+
+  private async mirror(session: MirrorSession, phase: SessionPhase | undefined): Promise<void> {
+    if (phase === undefined || session.header.parentSession !== undefined) return
+    const sessionId = wireSessionId(session.id)
+    // 非 UUID 形态的本地 id（如 `session-<counter>` 草稿）无法落 Kestra uuid 列，按不可镜像跳过。
+    if (sessionId === undefined) return
+    if (this.terminal.has(sessionId)) return
+    if (phase === 'completed' || phase === 'failed') this.terminal.add(sessionId)
+    const state = { source: 'dsh-pc-web', ...foldSyncState(session.deriveMessages?.() ?? []) }
+    const sub = this.client.currentSub()
+    const result = await this.client.push({
+      sessionId,
+      phase,
+      state: JSON.stringify(state),
+      ...(sub === '' ? {} : { userId: sub }),
+    })
+    if (result !== undefined && !result.ok) {
+      process.stderr.write(`[kestra-sync] session mirror push failed (${String(result.status)}): ${sessionId} -> ${phase}\n`)
+    }
+  }
+}

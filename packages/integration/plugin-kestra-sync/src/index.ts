@@ -12,8 +12,11 @@ import { pathToFileURL, fileURLToPath } from 'node:url'
 
 import { type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+// 事件负载（session/created、session/event）的 cordis Events 增补来自该包的 ambient 声明。
+import type {} from '@deepseek-ai/dsh-session'
 import {
   KestraSessionSyncClient,
+  SessionMirror,
   decideInputTarget,
   type KestraSyncConfig,
   type RemoteInput,
@@ -260,12 +263,20 @@ export function apply(ctx: Context, config: Config): KestraSessionSyncClient {
     let started: KestraSessionSyncClient | undefined
     ctx.inject(['webIdentity'], (identityCtx) => {
       warnDaemonConflict()
-      started = mountClient(identityCtx, config, new KestraSessionSyncClient(
-        config, fetch, Date.now, identityCtx.webIdentity))
+      const client = new KestraSessionSyncClient(config, fetch, Date.now, identityCtx.webIdentity)
+      started = mountClient(identityCtx, config, client)
+      mountSessionMirror(identityCtx, client)
     })
     return started as KestraSessionSyncClient
   }
   return mountClient(ctx, config, new KestraSessionSyncClient(config))
+}
+
+/** A10 ①：本地会话镜像 —— PC 端创建的会话推 Kestra dsh_session（手机端同 sub 可见）。 */
+function mountSessionMirror(ctx: Context, client: KestraSessionSyncClient): void {
+  const mirror = new SessionMirror(client)
+  ctx.on('session/created', (session) => { mirror.onCreated(session) })
+  ctx.on('session/event', (session, event) => { mirror.onEvent(session, event) })
 }
 
 export { executeRemoteInput }

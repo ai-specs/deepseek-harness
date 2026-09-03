@@ -9,6 +9,7 @@
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
+    { "path": "../../core/session" },
     { "path": "../../util/crypto" }
   ]
 }
