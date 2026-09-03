@@ -177,6 +177,18 @@
             issuerServerUrl: process.env.DSH_WEB_OIDC_SERVER_URL || process.env.DSH_WEB_OIDC_BROWSER_URL || '',
             clientId: process.env.DSH_WEB_OIDC_CLIENT_ID || 'dsh-pc',
           } : undefined
+    # A10 ②：OIDC 模式下把手机输入接力装进 web 进程 —— kestra-sync 用 webIdentity
+    # （浏览器登录留存的用户令牌）轮询 pending_input 并接力执行。非 OIDC 部署
+    # 该行惰性存在：auth/token 兜底为空值且 pollRemoteInputs=false，不轮询不推送。
+    - id: kestra-sync
+      name: '@deepseek-ai/dsh-plugin-kestra-sync'
+      config:
+        baseUrl: !!js process.env.DSH_KESTRA_URL || ''
+        auth: !!js process.env.DSH_WEB_AUTH === 'oidc' ? 'web-identity' : undefined
+        token: !!js process.env.DSH_WEB_AUTH === 'oidc' ? undefined : (process.env.DSH_KESTRA_TOKEN || '')
+        pollRemoteInputs: !!js process.env.DSH_WEB_AUTH === 'oidc' && process.env.DSH_KESTRA_URL !== undefined
+        pollIntervalMs: 5000
+        timeoutMs: 10000
 
     - id: api-remotes
       name: '@deepseek-ai/dsh-api-remotes'

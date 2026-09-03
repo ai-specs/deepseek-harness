@@ -6,7 +6,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 
@@ -19,6 +19,13 @@ import {
   type RemoteInput,
   type SessionSnapshot,
 } from './core.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** The web profile's retained user identity (provided by client-connection in oidc mode). */
+    webIdentity: import('./core.ts').WebIdentityHandle
+  }
+}
 
 export const name = 'kestra-sync'
 export const inject: string[] = []
@@ -37,7 +44,7 @@ export const Config: z<Config> = z.object({
   token: z.string(),
   clientId: z.string(),
   clientSecret: z.string(),
-  auth: z.union(['client_credentials', 'pkce']),
+  auth: z.union(['client_credentials', 'pkce', 'web-identity']),
   pkce: z.object({
     issuer: z.string(),
     clientId: z.string(),
@@ -217,9 +224,8 @@ async function executeRemoteInput(
   }
 }
 
-/** Started client handle kept on the plugin context for dispose. */
-export function apply(ctx: Context, config: Config): KestraSessionSyncClient {
-  const client = new KestraSessionSyncClient(config)
+/** Mount one configured client: provide + optional remote-input poller. */
+function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClient): KestraSessionSyncClient {
   ctx.provide('kestraSync', client)
 
   if (config.pollRemoteInputs) {
@@ -229,6 +235,37 @@ export function apply(ctx: Context, config: Config): KestraSessionSyncClient {
     )
   }
   return client
+}
+
+/**
+ * web-identity 模式与 daemon 互斥提醒：daemon 的 PKCE 缓存若属同一用户，
+ * 两条 refresh 链会因轮换吊销互相打断（实测）。缓存文件存在即提示——跨进程
+ * 无法可靠判定存活，宁可误报也不静默双跑。
+ */
+function warnDaemonConflict(): void {
+  const daemonCache = join(homedir(), '.dsh', 'oidc-pkce-token.json')
+  if (!existsSync(daemonCache)) return
+  let sub = ''
+  try {
+    sub = String((JSON.parse(readFileSync(daemonCache, 'utf8')) as { sub?: string }).sub ?? '')
+  } catch { /* 缓存损坏按未知处理 */ }
+  process.stderr.write(`[kestra-sync] WARNING: dsh-kestra-daemon cache present${sub ? ` (sub=${sub})` : ''} — running both revokes each other's refresh tokens; stop the daemon for this user
+`)
+}
+
+/** Started client handle kept on the plugin context for dispose. */
+export function apply(ctx: Context, config: Config): KestraSessionSyncClient {
+  if (config.auth === 'web-identity') {
+    // webIdentity 由 client-connection 在 OIDC 模式下提供；注入就绪后挂载。
+    let started: KestraSessionSyncClient | undefined
+    ctx.inject(['webIdentity'], (identityCtx) => {
+      warnDaemonConflict()
+      started = mountClient(identityCtx, config, new KestraSessionSyncClient(
+        config, fetch, Date.now, identityCtx.webIdentity))
+    })
+    return started as KestraSessionSyncClient
+  }
+  return mountClient(ctx, config, new KestraSessionSyncClient(config))
 }
 
 export { executeRemoteInput }

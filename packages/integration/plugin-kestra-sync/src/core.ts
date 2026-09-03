@@ -15,6 +15,14 @@ import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 
 import { PkceTokenProvider, type PkceConfig } from './pkce.ts'
 
+/** web 进程留存的用户身份（A10 ②）：结构化句柄，避免 integration 包反向依赖 client-connection。 */
+export interface WebIdentityHandle {
+  /** 可用 access token（自动续期）；未登录/链断时 undefined。 */
+  ensureAccessToken(): Promise<string | undefined>
+  /** 当前登录用户 OIDC sub；未加载/未登录时 undefined。 */
+  currentSub(): string | undefined
+}
+
 export interface KestraSyncConfig {
   /** Kestra API base URL, e.g. http://kestra.internal:8080 */
   baseUrl: string
@@ -32,9 +40,11 @@ export interface KestraSyncConfig {
   /**
    * 取票方式（默认按提供的凭据自动判定）：client_credentials=服务身份（AIAgent/脚本），
    * pkce=用户身份（Authorization Code + PKCE(S256)，会话归属该用户 OIDC sub ——
-   * dsh.docx：用户接入端一律 PKCE，客户端不持 client_secret）。
+   * dsh.docx：用户接入端一律 PKCE，客户端不持 client_secret）；
+   * web-identity=web 进程留存身份（auth='web-identity' 时必填 webIdentity 句柄，
+   * 令牌来自浏览器 OIDC 登录的留存与自动续期）。
    */
-  auth?: 'client_credentials' | 'pkce'
+  auth?: 'client_credentials' | 'pkce' | 'web-identity'
   /** PKCE 登录参数（auth='pkce' 时必填）。 */
   pkce?: PkceConfig
   /**
@@ -154,13 +164,20 @@ export class KestraSessionSyncClient {
   /** PKCE 用户身份提供者（auth='pkce' 时创建）。 */
   private readonly pkce: PkceTokenProvider | undefined
 
+  /** web 进程留存身份（auth='web-identity' 时由装配注入）。 */
+  private readonly webIdentity: WebIdentityHandle | undefined
+
   constructor(
     private readonly config: KestraSyncConfig,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly now: () => number = Date.now,
+    webIdentity?: WebIdentityHandle,
   ) {
     const explicit = config.auth
-    if (explicit === 'pkce') {
+    if (explicit === 'web-identity') {
+      if (!webIdentity) throw new Error('kestra-sync: auth=web-identity requires the webIdentity service')
+      this.webIdentity = webIdentity
+    } else if (explicit === 'pkce') {
       if (!config.pkce) throw new Error('kestra-sync: auth=pkce requires the pkce config block')
       this.pkce = new PkceTokenProvider({ ...config.pkce, fetchImpl, now })
     } else if (explicit === undefined && config.token === undefined && config.clientId === undefined && config.pkce) {
@@ -176,6 +193,11 @@ export class KestraSessionSyncClient {
 
   /** The effective Bearer token: the configured one, PKCE user identity, or a cached client_credentials token. */
   private async bearerToken(forceRefresh = false): Promise<string> {
+    if (this.webIdentity) {
+      const token = await this.webIdentity.ensureAccessToken()
+      if (token === undefined) throw new Error('kestra-sync: web identity unavailable (not signed in)')
+      return token
+    }
     if (this.pkce) return this.pkce.getToken(forceRefresh)
     if (this.config.token !== undefined) return this.config.token
     if (!forceRefresh
@@ -194,9 +216,9 @@ export class KestraSessionSyncClient {
     return this.cachedToken.value
   }
 
-  /** 当前登录用户（PKCE 模式返回 IdP sub；服务身份返回 client id）。 */
+  /** 当前登录用户（web-identity/PKCE 模式返回 IdP sub；服务身份返回 client id）。 */
   currentSub(): string {
-    return this.pkce?.currentSub() ?? this.config.clientId ?? ''
+    return this.webIdentity?.currentSub() ?? this.pkce?.currentSub() ?? this.config.clientId ?? ''
   }
 
   // ---------------------------------------------------------------- remote inputs
