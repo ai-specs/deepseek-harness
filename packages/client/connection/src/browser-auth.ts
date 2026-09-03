@@ -42,7 +42,7 @@ export function encodeBase64Url(value: Uint8Array): string {
     .replace(/=+$/u, '')
 }
 
-function decodeBase64Url(value: string): Buffer | undefined {
+export function decodeBase64Url(value: string): Buffer | undefined {
   if (!BASE64URL_PATTERN.test(value) || value.length % 4 === 1) return undefined
   const padding = '='.repeat((4 - value.length % 4) % 4)
   const decoded = Buffer.from(value.replaceAll('-', '+').replaceAll('_', '/') + padding, 'base64')

@@ -10,6 +10,7 @@ import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
 import { OidcBrowserAuth } from './oidc-browser-auth.ts'
+import { WebIdentityService } from './web-identity.ts'
 import { HostConnectionService } from './rpc-host.ts'
 
 export type {
@@ -147,15 +148,24 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
   assertImageBodyCapacity(ctx, maxRequestBodyBytes)
-  const browserAuth = oidcConfig !== undefined
-    ? await OidcBrowserAuth.create(ctx.credentials, {
+  let webIdentity: WebIdentityService | undefined
+  let browserAuth: BrowserAuth | OidcBrowserAuth
+  if (oidcConfig !== undefined) {
+    webIdentity = new WebIdentityService(ctx, {
+      url: new URL('/oidc/token', oidcConfig.issuerServerUrl ?? oidcConfig.issuerBrowserUrl).toString(),
+      clientId: oidcConfig.clientId,
+    })
+    await webIdentity.ensureLoaded()
+    browserAuth = await OidcBrowserAuth.create(ctx.credentials, {
       issuerBrowserUrl: oidcConfig.issuerBrowserUrl,
       issuerServerUrl: oidcConfig.issuerServerUrl,
       clientId: oidcConfig.clientId,
       callbackPath: oidcConfig.callbackPath,
       scope: oidcConfig.scope,
-    }, cookieMaxAgeDays)
-    : await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays)
+    }, cookieMaxAgeDays, webIdentity)
+  } else {
+    browserAuth = await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays)
+  }
   const connection = new HostConnectionService(ctx, trustedHosts, browserAuth)
   const fetchHandler = connection.createSharedFetchHandler(API_PATH)
   const route: WebRoute = {
