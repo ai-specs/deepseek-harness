@@ -167,6 +167,16 @@
         # A deployment adding authorities keeps this expression and concatenates
         # its literals, for example: ['app.internal', ...ctx.webRuntime.trustedHosts].
         trustedHosts: !!js ctx.webRuntime.trustedHosts
+        # 浏览器引导策略：默认控制台令牌（?token= URL）；设 DSH_WEB_AUTH=oidc 切换为
+        # Kestra IdP 登录（Authorization Code + PKCE，公开客户端 dsh-pc）——统一身份
+        # 部署用。数据面两种模式一致：本地会话存储为主，远程同步为辅。
+        auth: !!js process.env.DSH_WEB_AUTH || 'launch-token'
+        oidc: !!js >-
+          process.env.DSH_WEB_AUTH === 'oidc' ? {
+            issuerBrowserUrl: process.env.DSH_WEB_OIDC_BROWSER_URL || '',
+            issuerServerUrl: process.env.DSH_WEB_OIDC_SERVER_URL || process.env.DSH_WEB_OIDC_BROWSER_URL || '',
+            clientId: process.env.DSH_WEB_OIDC_CLIENT_ID || 'dsh-pc',
+          } : undefined
 
     - id: api-remotes
       name: '@deepseek-ai/dsh-api-remotes'

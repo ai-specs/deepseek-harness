@@ -9,6 +9,7 @@ import { API_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
+import { OidcBrowserAuth } from './oidc-browser-auth.ts'
 import { HostConnectionService } from './rpc-host.ts'
 
 export type {
@@ -81,12 +82,44 @@ export interface ConnectionConfig {
   cookieMaxAgeDays?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
   maxRequestBodyBytes?: number
+  /**
+   * Browser bootstrap strategy. `launch-token` (default) authenticates the
+   * first browser through the console-printed `?token=` URL; `oidc` redirects
+   * unauthenticated browsers to the Kestra IdP (Authorization Code + PKCE,
+   * public client) instead — the unified-identity deployment where the console
+   * is not read by the person at the browser. Local session storage is the
+   * data plane in both modes (本地为主，远程同步为辅).
+   */
+  auth?: 'launch-token' | 'oidc'
+  /** Required when `auth` is `oidc`. */
+  oidc?: {
+    /** Browser-facing IdP base URL (authorize/login redirects). */
+    issuerBrowserUrl: string
+    /** Server-facing IdP base URL for the code exchange; defaults to the browser URL. */
+    issuerServerUrl?: string
+    /** Public PKCE client id carrying the browser sign-in (e.g. `dsh-pc`). */
+    clientId: string
+    /** Callback path; must be registered on the IdP client. Default `/oidc/callback`. */
+    callbackPath?: string
+    /** Authorize scope. Default `openid profile`. */
+    scope?: string
+  }
 }
 
 export const Config: z<ConnectionConfig> = z.object({
   trustedHosts: z.array(String).default([]),
   cookieMaxAgeDays: z.natural().min(1).default(30),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
+  auth: z.union(['launch-token', 'oidc']).default('launch-token'),
+  // auth='oidc' 时 issuerBrowserUrl/clientId 必填——缺席在 apply() 里报错，
+  // 而不是让半配置的部署在首个浏览器请求时才失败。
+  oidc: z.object({
+    issuerBrowserUrl: z.string(),
+    issuerServerUrl: z.string(),
+    clientId: z.string(),
+    callbackPath: z.string().default('/oidc/callback'),
+    scope: z.string().default('openid profile'),
+  }),
 })
 
 /**
@@ -101,15 +134,29 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   const trustedHosts = config?.trustedHosts ?? []
   const cookieMaxAgeDays = config?.cookieMaxAgeDays ?? 30
   const maxRequestBodyBytes = config?.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES
+  const auth = config?.auth ?? 'launch-token'
+  let oidcConfig: NonNullable<ConnectionConfig['oidc']> | undefined
+  if (auth === 'oidc') {
+    const oidc = config?.oidc
+    if (oidc === undefined || !oidc.issuerBrowserUrl || !oidc.clientId) {
+      throw new Error('client-connection: auth="oidc" requires the oidc.issuerBrowserUrl and oidc.clientId settings')
+    }
+    oidcConfig = oidc
+  }
   // Config boundary: a malformed entry fails the load loudly here rather than
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
   assertImageBodyCapacity(ctx, maxRequestBodyBytes)
-  const connection = new HostConnectionService(
-    ctx,
-    trustedHosts,
-    await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays),
-  )
+  const browserAuth = oidcConfig !== undefined
+    ? await OidcBrowserAuth.create(ctx.credentials, {
+      issuerBrowserUrl: oidcConfig.issuerBrowserUrl,
+      issuerServerUrl: oidcConfig.issuerServerUrl,
+      clientId: oidcConfig.clientId,
+      callbackPath: oidcConfig.callbackPath,
+      scope: oidcConfig.scope,
+    }, cookieMaxAgeDays)
+    : await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays)
+  const connection = new HostConnectionService(ctx, trustedHosts, browserAuth)
   const fetchHandler = connection.createSharedFetchHandler(API_PATH)
   const route: WebRoute = {
     kind: 'prefix',
@@ -125,6 +172,16 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
     },
   }
   ctx.effect(() => ctx.webServer.register(route), 'client-connection: /api route')
+  if (browserAuth instanceof OidcBrowserAuth) {
+    // The IdP bounces the user's tab back here with ?code=&state=; the strategy
+    // owns the whole response (exchange, cookie mint, redirect to /).
+    const callbackRoute: WebRoute = {
+      kind: 'exact',
+      path: browserAuth.callbackPath,
+      handler: (req, res) => { void browserAuth.handleCallback(req, res) },
+    }
+    ctx.effect(() => ctx.webServer.register(callbackRoute), 'client-connection: oidc callback route')
+  }
   ctx.inject(['attachments'], (attachmentCtx) => {
     assertImageBodyCapacity(attachmentCtx, maxRequestBodyBytes)
   })

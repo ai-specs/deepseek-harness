@@ -11,7 +11,6 @@ import { clientRequestSchema } from './rpc-schema.ts'
 import { bridge, type FetchHandler } from './http-bridge.ts'
 import { isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
-import type { BrowserAuth } from './browser-auth.ts'
 import type {
   ConnectionIndexRequest,
   ConnectionIndexResponse,
@@ -27,6 +26,16 @@ import type {
   HostConnectionHandle,
   HostConnectionRpc,
 } from './rpc.ts'
+
+/** The browser-bootstrap strategy surface Connection actually consumes. */
+export interface ConnectionBrowserAuthStrategy {
+  /** Verify the authority-bound session cookie on a Host request. */
+  isAuthenticated(request: ConnectionTrustRequest): boolean
+  /** Authenticate one frontend index request, owning the bootstrap or 401. */
+  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean
+  /** The entry URL printed at startup (token-bearing or clean root). */
+  authenticatedUrl(baseUrl: string): string
+}
 
 const INVALID_REQUEST_RPC_ID = RpcId('invalid-request')
 const CHANNEL_PATTERN = /^\/[A-Za-z0-9._~-]+$/
@@ -69,7 +78,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
   constructor(
     ctx: Context,
     private readonly trustedHosts: readonly string[],
-    private readonly browserAuth: BrowserAuth,
+    private readonly browserAuth: ConnectionBrowserAuthStrategy,
   ) {
     super(ctx, 'connection')
   }

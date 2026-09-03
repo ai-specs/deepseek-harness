@@ -14,7 +14,7 @@ const DAY_MILLISECONDS = 24 * 60 * 60 * 1000
 const SECRET_BYTES = 32
 const TOKEN_QUERY = 'token'
 const COOKIE_PREFIX = 'dsh-auth-'
-const COOKIE_PAYLOAD_VERSION = 1
+export const COOKIE_PAYLOAD_VERSION = 1
 const STORED_SECRET_VERSION = 1
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]*$/
 const PROCESS_LAUNCH_TOKENS = new WeakMap<object, string>()
@@ -35,7 +35,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function encodeBase64Url(value: Uint8Array): string {
+export function encodeBase64Url(value: Uint8Array): string {
   return Buffer.from(value).toString('base64')
     .replaceAll('+', '-')
     .replaceAll('/', '_')
@@ -57,7 +57,7 @@ function processLaunchToken(owner: object): string {
   return created
 }
 
-function header(
+export function header(
   headers: ConnectionTrustRequest['headers'],
   name: string,
 ): string | undefined {
@@ -67,7 +67,7 @@ function header(
 }
 
 /** Canonical request authority used as the cookie name and signed audience. */
-function requestAuthority(headers: ConnectionTrustRequest['headers']): string | undefined {
+export function requestAuthority(headers: ConnectionTrustRequest['headers']): string | undefined {
   const host = header(headers, 'host')
   if (host === undefined) return undefined
   try {
@@ -103,12 +103,12 @@ function tokenMatches(actual: string, expected: string): boolean {
   return actualBytes.byteLength === expectedBytes.byteLength && timingSafeEqual(actualBytes, expectedBytes)
 }
 
-function cookieName(authority: string): string {
+export function cookieName(authority: string): string {
   return COOKIE_PREFIX + encodeBase64Url(createHash('sha256').update(authority).digest())
 }
 
 /** Read the exact generated cookie without implementing general Cookie decoding. */
-function cookieValue(headerValue: string, name: string): string | undefined {
+export function cookieValue(headerValue: string, name: string): string | undefined {
   for (const segment of headerValue.split(';')) {
     const at = segment.indexOf('=')
     if (at === -1 || segment.slice(0, at).trim() !== name) continue
@@ -118,7 +118,7 @@ function cookieValue(headerValue: string, name: string): string | undefined {
 }
 
 /** Serialize the fixed browser-session attributes; generated names and values are cookie-safe base64url. */
-function sessionCookie(name: string, value: string, expiresAt: number, maxAgeSeconds: number): string {
+export function sessionCookie(name: string, value: string, expiresAt: number, maxAgeSeconds: number): string {
   return `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; SameSite=Strict`
 }
 
@@ -126,12 +126,12 @@ function signature(secret: Buffer, body: string): Buffer {
   return createHmac('sha256', secret).update(body).digest()
 }
 
-function encodeCookie(payload: BrowserCookiePayload, secret: Buffer): string {
+export function encodeCookie(payload: BrowserCookiePayload, secret: Buffer): string {
   const body = encodeBase64Url(Buffer.from(JSON.stringify(payload), 'utf8'))
   return `v1.${body}.${encodeBase64Url(signature(secret, body))}`
 }
 
-function decodeCookie(value: string, secret: Buffer): BrowserCookiePayload | undefined {
+export function decodeCookie(value: string, secret: Buffer): BrowserCookiePayload | undefined {
   const parts = value.split('.')
   const [version, body, encodedSignature] = parts
   if (parts.length !== 3 || version !== 'v1' || body === undefined || encodedSignature === undefined) {
@@ -158,7 +158,7 @@ function decodeCookie(value: string, secret: Buffer): BrowserCookiePayload | und
   return decoded as unknown as BrowserCookiePayload
 }
 
-async function initializeSecret(credentials: CredentialProvider): Promise<Buffer> {
+export async function initializeSecret(credentials: CredentialProvider): Promise<Buffer> {
   const generated: StoredSecretPayload = {
     version: STORED_SECRET_VERSION,
     secret: encodeBase64Url(randomBytes(SECRET_BYTES)),

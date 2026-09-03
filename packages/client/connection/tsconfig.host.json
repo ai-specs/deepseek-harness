@@ -13,6 +13,7 @@
     "src/index.ts",
     "src/invariant.ts",
     "src/loopback-hostname.ts",
+    "src/oidc-browser-auth.ts",
     "src/rpc-host.ts",
     "src/rpc-schema.ts",
     "src/rpc.ts"
