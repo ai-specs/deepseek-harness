@@ -184,9 +184,13 @@
       name: '@deepseek-ai/dsh-plugin-kestra-sync'
       config:
         baseUrl: !!js process.env.DSH_KESTRA_URL || ''
-        auth: !!js process.env.DSH_WEB_AUTH === 'oidc' ? 'web-identity' : undefined
-        token: !!js process.env.DSH_WEB_AUTH === 'oidc' ? undefined : (process.env.DSH_KESTRA_TOKEN || '')
-        pollRemoteInputs: !!js process.env.DSH_WEB_AUTH === 'oidc' && process.env.DSH_KESTRA_URL !== undefined
+        # 非 OIDC 部署给惰性合法值（client_credentials+空 token，不轮询不推送）。
+        # 注意：内联 !!js 的三元会被 include 求值器包成对象，条件必须用块标量。
+        auth: !!js >-
+          process.env.DSH_WEB_AUTH === 'oidc' ? 'web-identity' : 'client_credentials'
+        token: !!js process.env.DSH_KESTRA_TOKEN || ''
+        pollRemoteInputs: !!js >-
+          process.env.DSH_WEB_AUTH === 'oidc' && process.env.DSH_KESTRA_URL !== undefined
         pollIntervalMs: 5000
         timeoutMs: 10000
 
