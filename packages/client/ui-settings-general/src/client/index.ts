@@ -26,6 +26,7 @@ import type {
 import { SettingsRoot } from './SettingsRoot.tsx'
 import { CloseLabel, HeaderContent, TriggerContent } from './chrome.tsx'
 import { GeneralSection } from './GeneralSection.tsx'
+import { UserSection } from './UserSection.tsx'
 import { SettingsDocumentAction } from './SettingsDocumentAction.tsx'
 import type { SettingsDocumentActionInjected } from './SettingsDocumentAction.tsx'
 import { SettingsDocumentStore } from './settings-document-store.ts'
@@ -180,4 +181,13 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     children: { 'settings.general.item': { kind: 'list', scope: 'root' } },
   }, GeneralSection))
+  // 「我的」：面板导航最末位的身份 section —— 当前用户（/whoami）+ 退出登录
+  // （/logout：清本机留存身份与会话 cookie，并经 IdP RP-initiated logout 终结 SSO）。
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'user',
+    order: 100,
+    label: () => t('user.nav'),
+    locale: NS,
+  }, UserSection))
 }

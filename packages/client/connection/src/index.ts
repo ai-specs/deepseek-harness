@@ -191,6 +191,39 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
       handler: (req, res) => { void browserAuth.handleCallback(req, res) },
     }
     ctx.effect(() => ctx.webServer.register(callbackRoute), 'client-connection: oidc callback route')
+    // 「我的」的数据面：当前登录用户（WebIdentity 留存的 sub）与退出登录。
+    // 退出 = 删本地留存身份 + 作废会话 cookie + IdP RP-initiated logout
+    // （终结 SSO 会话，否则下次登录被静默重登同一账号）。
+    const whoamiRoute: WebRoute = {
+      kind: 'exact',
+      path: '/whoami',
+      handler: (req, res) => {
+        // The identity is server-side state; the route must still gate on the
+        // caller's own session cookie so the sub never leaks without one.
+        if (!browserAuth.isAuthenticated(req)) {
+          res.writeHead(401, { 'cache-control': 'no-store', 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'not signed in' }))
+          return
+        }
+        void webIdentity?.ensureLoaded().then(() => {
+          const sub = webIdentity?.currentSub()
+          if (sub === undefined) {
+            res.writeHead(401, { 'cache-control': 'no-store', 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: 'not signed in' }))
+            return
+          }
+          res.writeHead(200, { 'cache-control': 'no-store', 'content-type': 'application/json' })
+          res.end(JSON.stringify({ sub }))
+        })
+      },
+    }
+    const logoutRoute: WebRoute = {
+      kind: 'exact',
+      path: '/logout',
+      handler: (req, res) => { void browserAuth.handleLogout(req, res) },
+    }
+    ctx.effect(() => ctx.webServer.register(whoamiRoute), 'client-connection: whoami route')
+    ctx.effect(() => ctx.webServer.register(logoutRoute), 'client-connection: logout route')
   }
   ctx.inject(['attachments'], (attachmentCtx) => {
     assertImageBodyCapacity(attachmentCtx, maxRequestBodyBytes)

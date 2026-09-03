@@ -87,6 +87,7 @@ export class OidcBrowserAuth {
   private readonly tokenEndpointUrl: string
   private identity: { readonly alive: () => boolean } | undefined
   private identitySink: ((payload: WebIdentityPayload) => Promise<void>) | undefined
+  private identityClear: (() => Promise<void>) | undefined
 
   private constructor(
     private readonly config: OidcBrowserAuthConfig,
@@ -110,11 +111,16 @@ export class OidcBrowserAuth {
     credentials: CredentialProvider,
     config: OidcBrowserAuthConfig,
     maxAgeDays: number,
-    identity?: { readonly alive: () => boolean; readonly save?: (payload: WebIdentityPayload) => Promise<void> },
+    identity?: {
+      readonly alive: () => boolean
+      readonly save?: (payload: WebIdentityPayload) => Promise<void>
+      readonly clear?: () => Promise<void>
+    },
   ): Promise<OidcBrowserAuth> {
     const auth = new OidcBrowserAuth(config, await initializeSecret(credentials), maxAgeDays)
     auth.identity = identity
     auth.identitySink = identity?.save?.bind(identity)
+    auth.identityClear = identity?.clear?.bind(identity)
     return auth
   }
 
@@ -122,13 +128,16 @@ export class OidcBrowserAuth {
    * Bind the retained web identity: once bound, a cookie only authenticates
    * while the identity is alive, so a broken refresh chain forces a fresh
    * sign-in instead of leaving a UI that works while the relay silently dies.
+   * The optional clear hook is logout's first step (drop the retained tokens).
    */
   bindIdentity(identity: {
     readonly alive: () => boolean
     readonly save?: (payload: WebIdentityPayload) => Promise<void>
+    readonly clear?: () => Promise<void>
   }): void {
     this.identity = identity
     if (identity.save !== undefined) this.identitySink = identity.save.bind(identity)
+    this.identityClear = identity.clear?.bind(identity)
   }
 
   /** The server-authoritative callback path the deployment must register on the IdP client. */
@@ -258,6 +267,34 @@ export class OidcBrowserAuth {
       && payload.expiresAt > payload.issuedAt
       && payload.expiresAt - payload.issuedAt <= this.maxAgeMilliseconds
       && (this.identity === undefined || this.identity.alive())
+  }
+
+  /**
+   * Logout: drop the retained web identity, expire the session cookie, and
+   * send the browser to the IdP's RP-initiated logout (which ends the SSO
+   * session and — when the root redirect is registered on the client — lands
+   * back on this deployment's root, where the fence routes to a fresh
+   * sign-in). Owns the response in every outcome.
+   */
+  async handleLogout(req: ConnectionIndexRequest, res: ConnectionIndexResponse): Promise<void> {
+    await this.identityClear?.().catch(() => undefined)
+    const authority = requestAuthority(req.headers)
+    const location = new URL('/oidc/logout', this.config.issuerBrowserUrl)
+    if (authority !== undefined) {
+      // The IdP whitelist only honors return targets that are registered
+      // redirect URIs on this client (open-redirect guard).
+      location.searchParams.set('post_logout_redirect_uri', `http://${authority}/`)
+    }
+    const headers: Record<string, string> = {
+      'cache-control': 'no-store',
+      'location': location.toString(),
+      'referrer-policy': 'no-referrer',
+    }
+    if (authority !== undefined) {
+      headers['set-cookie'] = sessionCookie(cookieName(authority), '', 0, 0)
+    }
+    res.writeHead(303, headers)
+    res.end()
   }
 
   /** Build the authorize redirect and remember the matching PKCE verifier. */

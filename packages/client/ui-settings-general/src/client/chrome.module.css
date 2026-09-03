@@ -5,3 +5,49 @@
   overflow: hidden;
   white-space: nowrap;
 }
+
+/* Identity button (left of the settings trigger, same foot row): mirrors the
+ * trigger's chrome — pill in the wide column, circle in the 56px rail. */
+.userTrigger {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  height: 42px;
+  margin: 0;
+  padding: 0 10px 0 8px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.userTrigger:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Rail: the same 36x36 circle box as the other rail controls. */
+.userRail {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.userLabel {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
