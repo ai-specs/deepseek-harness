@@ -58,6 +58,7 @@ describe('kestra-run observer', () => {
         content: [{ type: 'text', text: '中间答复' }],
         source: { provider: 'mock', model: 'mock-model' },
       }),
+      stream: [],
       usage: { inputTokens: 100, outputTokens: 20 },
     }))
     observeEvent(tallies, event('turn/start', { turn: 1 }))
@@ -67,6 +68,7 @@ describe('kestra-run observer', () => {
         content: [{ type: 'text', text: '最终答复' }],
         source: { provider: 'mock', model: 'mock-model' },
       }),
+      stream: [],
       usage: { inputTokens: 200, outputTokens: 50, totalTokens: 370 },
     }))
     observeEvent(tallies, event('turn/end', { turn: 1, reason: { kind: 'completed' } }))
@@ -90,6 +92,7 @@ describe('kestra-run observer', () => {
         content: [{ type: 'text', text: '部分输出' }],
         source: { provider: 'mock', model: 'mock-model' },
       }),
+      stream: [],
     }))
     observeEvent(tallies, event('turn/end', {
       turn: 0,
@@ -121,6 +124,7 @@ describe('kestra-run observer', () => {
         content: [{ type: 'text', text: 'hello' }],
         source: { provider: 'mock', model: 'mock-model' },
       }),
+      stream: [],
     }))
 
     writeFileSync(file, JSON.stringify(projectResult(tallies)))
