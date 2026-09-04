@@ -59,6 +59,8 @@ export interface OidcBrowserAuthConfig {
   readonly callbackPath?: string | undefined
   /** Authorize scope. Default `openid profile`. */
   readonly scope?: string | undefined
+  /** Optional explicit end-session endpoint override; discovered otherwise. */
+  readonly endSessionEndpoint?: string | undefined
 }
 
 const VERIFIER_BYTES = 32
@@ -74,6 +76,36 @@ interface PendingLogin {
 }
 
 /**
+ * Discover the IdP's end-session endpoint via OIDC Discovery
+ * ({@code /.well-known/openid-configuration}), so RP-initiated logout uses the
+ * standard discovered endpoint instead of a hard-coded path. Falls back to the
+ * conventional {@code /oidc/logout} on the browser-facing issuer when discovery
+ * is unreachable — logout must never silently break on a non-standard IdP.
+ * The server-side fetch uses {@code issuerServerUrl}; the returned endpoint is
+ * the browser-reachable URL the user's tab is redirected to.
+ */
+async function discoverEndSessionEndpoint(config: OidcBrowserAuthConfig): Promise<string> {
+  if (config.endSessionEndpoint !== undefined && config.endSessionEndpoint !== '') {
+    return config.endSessionEndpoint
+  }
+  const fallback = new URL('/oidc/logout', config.issuerBrowserUrl).toString()
+  try {
+    const response = await fetch(
+      new URL('/.well-known/openid-configuration', config.issuerServerUrl ?? config.issuerBrowserUrl).toString(),
+      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(TOKEN_TIMEOUT_MILLISECONDS) },
+    )
+    if (!response.ok) return fallback
+    const doc = await response.json() as { end_session_endpoint?: unknown }
+    if (typeof doc.end_session_endpoint === 'string' && doc.end_session_endpoint !== '') {
+      return doc.end_session_endpoint
+    }
+  } catch {
+    // fall through to the conventional path
+  }
+  return fallback
+}
+
+/**
  * The same v1 signed-cookie contract as {@link BrowserAuth}, minted through an
  * IdP round-trip. The server keeps one in-memory pending sign-in per attempt
  * (state → PKCE verifier, 10-minute TTL); a `dsh web` restart simply expires
@@ -85,6 +117,7 @@ export class OidcBrowserAuth {
   private readonly pending = new Map<string, PendingLogin>()
   private readonly scope: string
   private readonly tokenEndpointUrl: string
+  private readonly endSessionEndpoint: string
   private identity: { readonly alive: () => boolean } | undefined
   private identitySink: ((payload: WebIdentityPayload) => Promise<void>) | undefined
   private identityClear: (() => Promise<void>) | undefined
@@ -93,12 +126,14 @@ export class OidcBrowserAuth {
     private readonly config: OidcBrowserAuthConfig,
     secret: Buffer,
     maxAgeDays: number,
+    endSessionEndpoint: string,
   ) {
     this.scope = config.scope ?? DEFAULT_SCOPE
     this.tokenEndpointUrl = new URL(
       '/oidc/token',
       config.issuerServerUrl ?? config.issuerBrowserUrl,
     ).toString()
+    this.endSessionEndpoint = endSessionEndpoint
     this.maxAgeMilliseconds = maxAgeDays * 24 * 60 * 60 * 1000
     if (!Number.isSafeInteger(Date.now() + this.maxAgeMilliseconds)) {
       throw new Error('client-connection: cookieMaxAgeDays exceeds the safe timestamp range')
@@ -117,7 +152,12 @@ export class OidcBrowserAuth {
       readonly clear?: () => Promise<void>
     },
   ): Promise<OidcBrowserAuth> {
-    const auth = new OidcBrowserAuth(config, await initializeSecret(credentials), maxAgeDays)
+    const auth = new OidcBrowserAuth(
+      config,
+      await initializeSecret(credentials),
+      maxAgeDays,
+      await discoverEndSessionEndpoint(config),
+    )
     auth.identity = identity
     auth.identitySink = identity?.save?.bind(identity)
     auth.identityClear = identity?.clear?.bind(identity)
@@ -279,7 +319,8 @@ export class OidcBrowserAuth {
   async handleLogout(req: ConnectionIndexRequest, res: ConnectionIndexResponse): Promise<void> {
     await this.identityClear?.().catch(() => undefined)
     const authority = requestAuthority(req.headers)
-    const location = new URL('/oidc/logout', this.config.issuerBrowserUrl)
+    // RP-initiated logout against the IdP's discovered end-session endpoint.
+    const location = new URL(this.endSessionEndpoint)
     if (authority !== undefined) {
       // The IdP whitelist only honors return targets that are registered
       // redirect URIs on this client (open-redirect guard).
