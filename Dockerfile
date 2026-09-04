@@ -16,6 +16,10 @@
 # ── builder：安装 + 构建 ─────────────────────────────────────────────────────
 FROM node:24-slim AS builder
 ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+# 原生依赖编译链：fs-ext（上游 session write-lease）等需要 node-gyp（python3/make/g++）
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 WORKDIR /app
 
@@ -47,6 +51,12 @@ COPY website website
 # 在本 fork 工作树存在与运行时无关的遗留 TS6307（上游复合工程边界问题），因此
 # 镜像内不重建全库，改为对 AIAgent 容器契约产物做强制验证门——缺失或不可加载
 # 即镜像失败。
+# install 用 --ignore-scripts 保证网络鲁棒性；原生模块的 install 脚本（node-gyp）
+# 在此显式补跑——上游 0.1.3 的 session write-lease 让 vendor loader 在启动路径
+# require fs-ext 原生二进制，缺它 headless 入口直接 MODULE_NOT_FOUND。
+# （pnpm rebuild <pkg> 不命中 workspace 传递依赖，故直接定位 .pnpm 下的包跑 node-gyp）
+RUN find /app/node_modules/.pnpm -maxdepth 1 -name 'fs-ext@*' -type d | while read -r d; do \
+      (cd "$d/node_modules/fs-ext" && npx node-gyp rebuild) ; done
 RUN node --input-type=module -e "\
     import('/app/packages/integration/plugin-kestra-run/lib/index.js')\
       .then(m => { if (m.name !== 'kestra-run') throw new Error('bad plugin name: ' + m.name);\
