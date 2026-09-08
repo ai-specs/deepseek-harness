@@ -164,6 +164,31 @@ describe('SessionMirror', () => {
     expect(pushes.length).toBe(1)
   })
 
+  it('reads the replayed log off snapshotEvents() — the live Session has no events property', async () => {
+    const { mirror, pushes } = harness()
+    // 模拟真实 cordis Session 形状：没有 `events` 字段，事件经 snapshotEvents() 暴露。
+    // 回归：此前 onCreated 只读 `session.events ?? []`，恢复通告恒推导 running，
+    // 安静会话在 Kestra 端永久「执行中」。
+    const live = {
+      id: `session-${UUID_A}`,
+      header: {},
+      deriveMessages: () => [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      ],
+      snapshotEvents: () => [
+        { type: 'turn/start', data: { turn: 0 } },
+        { type: 'turn/end', data: { turn: 0, reason: { kind: 'completed' } } },
+      ],
+    } satisfies MirrorSession
+    mirror.onCreated(live)
+    await vi.waitFor(() => expect(pushes.length).toBe(1))
+    expect(pushes[0]).toMatchObject({ sessionId: UUID_A, phase: 'completed' })
+    mirror.onEvent(live, { type: 'turn/start', data: { turn: 1 } })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(pushes.length).toBe(1)
+  })
+
   it('skips forked subagent sessions entirely', async () => {
     const { mirror, pushes } = harness()
     const sub = session({ id: `session-${UUID_A}`, parentSession: `session-${UUID_B}` })

@@ -401,6 +401,8 @@ export interface MirrorSession {
   deriveMessages?(): ReadonlyArray<{ role: string; content: unknown }>
   /** 规范事件日志（created/恢复通告从末尾推导真实阶段用）。 */
   events?: ReadonlyArray<{ type: string; data?: unknown }>
+  /** core Session 的真实事件读取面：Session 实例没有 `events` 属性，恢复通告从这里取已回放日志。 */
+  snapshotEvents?(): ReadonlyArray<{ type: string; data?: unknown }>
 }
 
 /** 会话生命周期事件 → 同步阶段。`turn/end` 按 reason.kind 区分 FAILED/COMPLETED；其余事件不推送。 */
@@ -478,7 +480,11 @@ export class SessionMirror {
 
   /** `session/created` 观测入口：新会话与重启恢复的会话都经此发布；阶段按日志末尾推导。 */
   onCreated(session: MirrorSession): void {
-    void this.mirror(session, deriveSessionPhaseFromLog(session.events ?? []))
+    // core Session 不带 `events` 属性（恒 undefined→空日志→兜底 running）；恢复通告
+    // 的真实日志在 snapshotEvents()（resume 路径已把持久化日志作为 seed 灌入）。
+    // 推错 RUNNING 无法自愈：Kestra 状态机无终态出边，安静会话再无事件纠正 → 手机端永远「执行中」。
+    const events = session.events ?? session.snapshotEvents?.() ?? []
+    void this.mirror(session, deriveSessionPhaseFromLog(events))
   }
 
   /** `session/event` 观测入口：turn/start、turn/end 驱动阶段迁移。 */
