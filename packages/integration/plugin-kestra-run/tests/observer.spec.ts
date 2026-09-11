@@ -15,7 +15,7 @@ function event<T extends SessionEvent['type']>(
   type: T,
   data: Extract<SessionEvent, { type: T }>['data'],
 ): SessionEvent {
-  return { type, data, seq: 1, time: new Date() } as SessionEvent
+  return { type, data, seq: 1, time: new Date() } as unknown as SessionEvent
 }
 
 /** A Context double that just captures event listeners for later invocation. */
