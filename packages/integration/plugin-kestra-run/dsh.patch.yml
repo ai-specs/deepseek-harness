@@ -14,6 +14,9 @@
 # plugin file is modified. NOTE: keep the !!js expressions single-line (the
 # patch YAML parser rejects multi-line scalars). bin/dsh-run.mjs generates the
 # same overlay with an absolute file-URL plugin name — keep both in sync.
+# 本文件保持 env 驱动（Kestra AIAgent 容器 DSH_HOME 全新、无 user layer，env 合法生效）；
+# PC 手机输入接力平面（plugin-kestra-sync）的 overlay 在生成时写死具体值
+# （env > agentDefaultModel.currentSelection() > 历史默认），见该插件的 resolveRelayModel。
 
 - id: agent-default-model
   config:

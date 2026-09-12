@@ -52,25 +52,40 @@ COPY website website
 # 镜像内不重建全库，改为对 AIAgent 容器契约产物做强制验证门——缺失或不可加载
 # 即镜像失败。
 # install 用 --ignore-scripts 保证网络鲁棒性；原生模块的 install 脚本（node-gyp）
-# 在此显式补跑——上游 0.1.3 的 session write-lease 让 vendor loader 在启动路径
-# require fs-ext 原生二进制，缺它 headless 入口直接 MODULE_NOT_FOUND。
-# （pnpm rebuild <pkg> 不命中 workspace 传递依赖，故直接定位 .pnpm 下的包跑 node-gyp）
-RUN find /app/node_modules/.pnpm -maxdepth 1 -name 'fs-ext@*' -type d | while read -r d; do \
-      (cd "$d/node_modules/fs-ext" && npx node-gyp rebuild) ; done
+# 在此显式补跑。历史上 fs-ext（上游 session write-ownership lease）必须在此编译；
+# 上游 d927cbff99（+852 合并内）以预编译 flock（native/system bin/*/system.node，
+# 由下方 prebuilds 段组装+验证）替代后，安装树可以合法地不含 fs-ext——存在则必须
+# 编译成功并验证产物（target_name=fs_ext → build/Release/fs_ext.node），缺席则
+# 显式声明（不再静默空转）。
+RUN set -eux; \
+    dirs=$(find /app/node_modules/.pnpm -maxdepth 1 -name 'fs-ext@*' -type d); \
+    if [ -z "$dirs" ]; then \
+      echo 'fs-ext absent from install tree (superseded by prebuilt flock, upstream d927cbff99) — nothing to build'; \
+    else \
+      for d in $dirs; do \
+        (cd "$d/node_modules/fs-ext" && npx node-gyp rebuild); \
+        test -f "$d/node_modules/fs-ext/build/Release/fs_ext.node"; \
+      done; \
+    fi
 # 上游 native/system 平台包（@deepseek-ai/node-addon-system-<os>-<arch>）的 bin/ 是
 # 发布产物（git 只含 prebuilds.json 清单）；workspace 以 optionalDependencies 链接
 # 这些目录，构建容器实际加载的就是工作树副本。按 builder 实际平台从 registry 的
 # 预编译包解出二进制补齐，否则 flock/landlock 运行时 MODULE_NOT_FOUND，
 # web 会话一启动即「本轮运行失败」。
+# 版本按 $plat 各自 package.json 读取（x64 构建不再误读 arm64 版本）；npmmirror
+# 拉取失败清残留后回退官方源；解包后按该平台 prebuilds.json 清单逐项验证，
+# 不再只测 glibc/system.node 单文件。
 RUN set -eux; \
     plat="linux-$(node -p 'process.arch === "arm64" ? "arm64" : "x64"')"; \
-    ver="$(node -p "require('/app/native/system/packages/linux-arm64/package.json').version")"; \
+    ver="$(node -p "require('/app/native/system/packages/$plat/package.json').version")"; \
     mkdir -p /tmp/prebuild && cd /tmp/prebuild; \
-    npm pack "@deepseek-ai/node-addon-system-$plat@$ver" --silent; \
+    (npm pack "@deepseek-ai/node-addon-system-$plat@$ver" --silent \
+      || { rm -f ./*.tgz; \
+           npm pack "@deepseek-ai/node-addon-system-$plat@$ver" --silent --registry=https://registry.npmjs.org; }); \
     tar -xzf ./*.tgz package/bin; \
     mkdir -p "/app/native/system/packages/$plat/bin"; \
-    cp -r package/bin/. "/app/native/system/packages/$plat/bin/" \
- && test -f "/app/native/system/packages/$plat/bin/glibc/system.node"
+    cp -r package/bin/. "/app/native/system/packages/$plat/bin/"; \
+    node -e 'const fs=require("fs");const plat=process.argv[1];const dir="/app/native/system/packages/"+plat+"/";const m=JSON.parse(fs.readFileSync(dir+"prebuilds.json","utf8"));const missing=m.binaries.filter(b=>!fs.existsSync(dir+b.path));if(missing.length){console.error("missing prebuilds for "+plat+": "+missing.map(b=>b.path).join(", "));process.exit(1)}console.log("prebuilds gate OK: "+m.binaries.length+" binaries for "+plat)' "$plat"
 RUN node --input-type=module -e "\
     import('/app/packages/integration/plugin-kestra-run/lib/index.js')\
       .then(m => { if (m.name !== 'kestra-run') throw new Error('bad plugin name: ' + m.name);\
