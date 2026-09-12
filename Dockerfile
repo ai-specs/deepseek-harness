@@ -57,6 +57,20 @@ COPY website website
 # （pnpm rebuild <pkg> 不命中 workspace 传递依赖，故直接定位 .pnpm 下的包跑 node-gyp）
 RUN find /app/node_modules/.pnpm -maxdepth 1 -name 'fs-ext@*' -type d | while read -r d; do \
       (cd "$d/node_modules/fs-ext" && npx node-gyp rebuild) ; done
+# 上游 native/system 平台包（@deepseek-ai/node-addon-system-<os>-<arch>）的 bin/ 是
+# 发布产物（git 只含 prebuilds.json 清单）；workspace 以 optionalDependencies 链接
+# 这些目录，构建容器实际加载的就是工作树副本。按 builder 实际平台从 registry 的
+# 预编译包解出二进制补齐，否则 flock/landlock 运行时 MODULE_NOT_FOUND，
+# web 会话一启动即「本轮运行失败」。
+RUN set -eux; \
+    plat="linux-$(node -p 'process.arch === "arm64" ? "arm64" : "x64"')"; \
+    ver="$(node -p "require('/app/native/system/packages/linux-arm64/package.json').version")"; \
+    mkdir -p /tmp/prebuild && cd /tmp/prebuild; \
+    npm pack "@deepseek-ai/node-addon-system-$plat@$ver" --silent; \
+    tar -xzf ./*.tgz package/bin; \
+    mkdir -p "/app/native/system/packages/$plat/bin"; \
+    cp -r package/bin/. "/app/native/system/packages/$plat/bin/" \
+ && test -f "/app/native/system/packages/$plat/bin/glibc/system.node"
 RUN node --input-type=module -e "\
     import('/app/packages/integration/plugin-kestra-run/lib/index.js')\
       .then(m => { if (m.name !== 'kestra-run') throw new Error('bad plugin name: ' + m.name);\
