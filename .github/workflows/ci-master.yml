@@ -133,6 +133,8 @@ jobs:
   serial-linux-selfhosted:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     name: serial / linux (self-hosted standby)
+    # dsh fork: 上游自托管 runner（vm-backup/dsh-win-ci）fork 不可用——跳过
+    if: github.repository == 'deepseek-ai/deepseek-harness'
     runs-on: [self-hosted, linux, x64, vm-backup]
     steps:
       # DSH_ARCHIVE_BASE_REF below compares the frozen-archive gate against
@@ -227,6 +229,7 @@ jobs:
   serial-windows:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     name: serial / windows (self-hosted standby)
+    if: github.repository == 'deepseek-ai/deepseek-harness'
     runs-on: [self-hosted, dsh-win-ci, windows]
     timeout-minutes: 120
     steps:
