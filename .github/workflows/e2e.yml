@@ -27,14 +27,14 @@ name: E2E (real DeepSeek API)
 #
 # Note: scheduled triggers are auto-disabled after 60 days of repo inactivity;
 # push/pull_request/workflow_dispatch act as backstops.
+# dsh fork 裁剪（2026-09-13）：移除 push/schedule/pull_request 触发（保留手动入口）。
+# 根因：本 job 的 build:official 步骤在干净 checkout 上因 typert 生成物 chicken-egg
+# （同 sandbox.yml 注释）必败；且 fork 仓库未配置 DEEPSEEK_API_KEY_EXTERNAL secret
+# （preflight 防假绿设计会硬失败）。真实 LLM 门禁价值保留在本地（主仓 compose 栈
+# ego-browser 全链路验收，见 docs/merge-upstream-review-20260912.md）；待上游修复
+# 生成链并配置 secret 后按上游原版恢复 on: 块。
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master]
-  pull_request:
-  schedule:
-    # 00:17 UTC nightly = 08:17 Asia/Shanghai — off the top-of-hour cron stampede.
-    - cron: '17 0 * * *'
 
 # Keep only the newest validation in each workflow/ref, including master
 # pushes, nightly runs, and manual dispatches.

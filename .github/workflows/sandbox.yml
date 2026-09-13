@@ -7,9 +7,13 @@
 # from the same tarballs the main-repository release workflow publishes.
 name: Sandbox
 
+# dsh fork 裁剪（2026-09-13）：移除 push 触发。根因：build:official 在干净 checkout 上
+# 因 typert 生成物 chicken-egg（client face tsc 消费 host face tsdown 的生成物：ClientRemote
+# .workspace 命名空间、@deepseek-ai/dsh-api-workspace-controller/remote 子路径）必败——上游
+# repo 自身从不运行本 workflow（Actions 仅 Dependabot），属上游未验证管线；landlock 沙箱
+# e2e 本身有价值，等上游修复生成链后按上游原版恢复 on: 块。
 on:
-  push:
-    branches: [master]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

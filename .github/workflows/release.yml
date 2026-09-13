@@ -7,10 +7,12 @@
 # release-publish.yml from a dsh-v* tag.
 name: Release (dsh)
 
+# dsh fork 裁剪（2026-09-13）：移除 push/pull_request 触发（保留手动入口）。
+# 根因：Release (dsh) 的 verify-npm-install-layout 曾因 fork 插件包版本未随 workspace
+# 对齐而失败（已修：guard/integration 五包 0.1.5-rc.2）；但其后继步骤与 build:official
+# 全链同陷 typert 生成物 chicken-egg（见 sandbox.yml 注释）。npm 发布不在 fork 交付面
+# （fork 交付=容器镜像+主仓 compose 集成）；待上游修复后按原版恢复 on: 块。
 on:
-  pull_request:
-  push:
-    branches: [master]
   workflow_dispatch:
 
 permissions:

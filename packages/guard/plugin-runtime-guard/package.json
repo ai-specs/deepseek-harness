@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-plugin-runtime-guard",
   "description": "dsh local guard plugin (runtime-guard) — golden-indicator protection per dsh.docx",
-  "version": "0.1.2-alpha.3",
+  "version": "0.1.5-rc.2",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

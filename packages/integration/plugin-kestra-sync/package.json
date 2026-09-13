@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-plugin-kestra-sync",
   "description": "Pushes dsh (PC) session state snapshots to Kestra — session sync client for the dsh.docx topology",
-  "version": "0.1.2-alpha.3",
+  "version": "0.1.5-rc.2",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -22,8 +22,7 @@
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/schemastery": "workspace:^"
+    "@deepseek-ai/dsh-session": "workspace:^"
   },
   "dsh": {
     "bundle": {
@@ -36,8 +35,5 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-util-crypto": "workspace:^"
-  },
-  "devDependencies": {
-    "@deepseek-ai/dsh-session": "workspace:^"
   }
 }
