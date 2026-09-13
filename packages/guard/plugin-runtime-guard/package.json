@@ -29,5 +29,9 @@
     "bundle": {
       "patch": "./dsh.patch.yml"
     }
-  }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/types/**/*.d.ts"
+  ]
 }
