@@ -76,7 +76,8 @@
       name: '@deepseek-ai/dsh-agent-default-model'
       config:
         provider: deepseek-official
-        model: deepseek-flash
+        # dsh fork: DSH_MODEL env 覆盖（DashScope 端点模型名与原生 API 不同）；上游默认不变
+        model: !!js process.env.DSH_MODEL || 'deepseek-flash'
 
     - id: jobs
       name: '@deepseek-ai/dsh-jobs-local'
