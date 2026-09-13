@@ -50,6 +50,8 @@ env:
   # CI runs must never report to the production telemetry endpoint baked
   # into apps/cli/cordis.yml (AppCLIEntry disables the row when set).
   DSH_TELEMETRY_DISABLED: '1'
+  # dsh fork: DashScope 端点的模型名与原生 API 不同（deepseek-flash → deepseek-v4-flash）
+  DSH_MODEL: deepseek-v4-flash
 
 jobs:
   e2e:
