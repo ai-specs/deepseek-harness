@@ -65,7 +65,7 @@ async function expectQuiescent(handles: readonly SubprocessHandle[]): Promise<vo
   }
 }
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)(
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || (process.env.DEEPSEEK_BASE_URL !== undefined && process.env.DEEPSEEK_BASE_URL !== 'https://api.deepseek.com'))(
   'Claude Code provider with real DeepSeek API',
   () => {
     it('returns one unique nonce through the production provider and real SDK/CLI', async () => {

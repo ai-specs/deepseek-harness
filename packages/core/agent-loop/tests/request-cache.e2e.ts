@@ -70,7 +70,8 @@ function waitForIdle(context: Context, agent: Agent): Promise<void> {
   })
 }
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('log-derived request cache hits (real API)', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || (process.env.DEEPSEEK_BASE_URL !== undefined && process.env.DEEPSEEK_BASE_URL !== 'https://api.deepseek.com'))('log-derived request cache hits (real API)', () => {
+  // dsh fork: prefix cache 命中指标是原生 API 专属（DashScope compatible-mode 不返回 prompt_cache_hit_tokens）
   it('every request after the first hits the provider prefix cache', async () => {
     ctx = await loopHarness()
     const agent = await ctx.agentLoop.create(SessionId('cache-e2e'), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
