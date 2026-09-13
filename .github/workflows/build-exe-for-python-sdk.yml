@@ -370,9 +370,6 @@ jobs:
                    || github.event.pull_request.user.login == 'dependabot[bot]'))
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
-          # dsh fork: DashScope endpoint override
-          DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
-          DSH_MODEL: ${{ vars.DSH_MODEL || 'deepseek-flash' }}
           # dsh fork: DashScope 端点（repo variable 覆盖，默认原生 API 不变）
           DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
           DSH_MODEL: ${{ vars.DSH_MODEL || 'deepseek-flash' }}
