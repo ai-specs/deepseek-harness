@@ -1,12 +1,8 @@
 name: CI master
 
-# dsh fork 裁剪（2026-09-13）：移除 push 触发（保留 workflow_dispatch 手动入口）。
-# 根因：本 workflow 依赖上游自托管发布管线（self-hosted standby runner、wine/windows、
-# build:official 全链），fork 无对应 runner 且 build:official 在干净 checkout 上因 typert
-# 生成物 chicken-egg（ClientRemote.workspace/…/remote 为 host face tsdown 生成物，client
-# face tsc 先于生成消费）必败——上游 repo 自身从不运行这些 hosted workflow（仅 Dependabot），
-# 属上游未验证管线。等上游修复并自跑后再回植 push 触发（对照上游原版恢复 on: 块）。
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
     inputs:
       suite:
