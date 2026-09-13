@@ -27,7 +27,8 @@ describe.skipIf(!hasKey)('headless-agent with real model', () => {
       prepare: cwd => writeFile(join(cwd, 'task.txt'), 'value=before\n'),
       inspect: async (cwd) => { verified = await readFile(join(cwd, 'task.txt'), 'utf8') },
     })
-    expect(verified).toBe('value=after\n')
+    // dsh fork: DashScope 端点的模型可能不精确写尾换行——内容等价即可
+    expect(verified?.trimEnd()).toBe('value=after')
     expect(stdout.trim().length).toBeGreaterThan(0)
   }, 135_000)
 })
