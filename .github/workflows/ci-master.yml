@@ -131,10 +131,9 @@ jobs:
   # persistent pnpm store and tool caches make them redundant (and saving here
   # would poison the hosted cache namespace with self-hosted paths).
   serial-linux-selfhosted:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.repository == 'deepseek-ai/deepseek-harness'
     name: serial / linux (self-hosted standby)
-    # dsh fork: 上游自托管 runner（vm-backup/dsh-win-ci）fork 不可用——跳过
-    if: github.repository == 'deepseek-ai/deepseek-harness'
+    # dsh fork: 追加 github.repository 条件——上游自托管 runner fork 不可用
     runs-on: [self-hosted, linux, x64, vm-backup]
     steps:
       # DSH_ARCHIVE_BASE_REF below compares the frozen-archive gate against
@@ -227,9 +226,9 @@ jobs:
   # (and saving here would poison the hosted cache namespace with self-hosted
   # paths).
   serial-windows:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.repository == 'deepseek-ai/deepseek-harness'
     name: serial / windows (self-hosted standby)
-    if: github.repository == 'deepseek-ai/deepseek-harness'
+    # dsh fork: 追加 github.repository 条件
     runs-on: [self-hosted, dsh-win-ci, windows]
     timeout-minutes: 120
     steps:
