@@ -407,7 +407,7 @@ jobs:
                    || github.event.pull_request.user.login == 'dependabot[bot]'))
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
-          DEEPSEEK_BASE_URL: https://api.deepseek.com
+          DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
         run: |
           set -euo pipefail
           blackbox_root="$(python -c 'import tempfile; print(tempfile.mkdtemp(prefix="dsh-sdk-blackbox-live-"))')"
@@ -428,7 +428,7 @@ jobs:
         shell: pwsh
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
-          DEEPSEEK_BASE_URL: https://api.deepseek.com
+          DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
         run: |
           $blackboxRoot = (& python -c 'import tempfile; print(tempfile.mkdtemp(prefix="dsh-sdk-blackbox-live-"))').Trim()
           Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
