@@ -41,6 +41,8 @@ export interface Config extends KestraSyncConfig {
   remoteInputTimeoutSeconds?: number
   /** 选项 B：SSE 指令接收主链路（默认 true）。false 时 PC 不接入中台（无降级轮询——A 组件已退役）。 */
   useSse?: boolean
+  /** 本地会话索引快照路径（默认 ~/.dsh/kestra-session-index.json；dsh 数据卷内即持久）。 */
+  sessionIndexPath?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -65,6 +67,7 @@ export const Config: z<Config> = z.object({
   queuePath: z.string(),
   remoteInputTimeoutSeconds: z.number(),
   useSse: z.boolean().default(true),
+  sessionIndexPath: z.string(),
 })
 
 export type * from './core.ts'
@@ -373,10 +376,13 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
   }
 
   // 本地会话索引（选项 B 查询面）：应答中台转发的 session.query（列表/详情）。
-  // 与 SessionMirror 同源观测（session/created、session/event），数据权威在 PC 本地。
-  const index = new SessionIndex()
+  // 会话数据权威在 PC 本地；快照持久化（~/.dsh/kestra-session-index.json）保证
+  // PC 重启后 headless 派生会话仍可被手机端查到（web 会话另经恢复通告重建，幂等）。
+  const index = new SessionIndex(config.sessionIndexPath ?? join(homedir(), '.dsh', 'kestra-session-index.json'))
   ctx.on('session/created', (session) => { index.upsert(session) })
   ctx.on('session/event', (session) => { index.upsert(session) })
+  // 退出兜底：进程正常退出前强制落盘（防抖周期最多丢 2s 内事件，正常退出不丢）。
+  process.once('exit', () => index.dispose())
 
   // 查询应答：session.list → 索引列表；session.detail → 索引详情（未命中回填 error）。
   const handleQuery = (query: { requestId: string; type: string; sessionId?: string }): Promise<void> => {

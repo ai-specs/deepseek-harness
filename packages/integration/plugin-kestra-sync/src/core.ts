@@ -7,7 +7,7 @@
  * session end.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -47,6 +47,8 @@ export interface KestraSyncConfig {
   auth?: 'client_credentials' | 'pkce' | 'web-identity'
   /** PKCE 登录参数（auth='pkce' 时必填）。 */
   pkce?: PkceConfig
+  /** 本地会话索引快照路径（默认 ~/.dsh/kestra-session-index.json）。 */
+  sessionIndexPath?: string
   /** Tenant used for the API path (Kestra 2.x multi-tenancy) */
   tenant?: string
   /** realtime pushes immediately; batch coalesces snapshots per interval */
@@ -618,6 +620,66 @@ export function deriveSessionPhaseFromLog(
  */
 export class SessionIndex {
   private readonly sessions = new Map<string, IndexedSession>()
+  private readonly filePath: string | undefined
+  private dirty = false
+  private flushTimer: ReturnType<typeof setInterval> | undefined
+
+  /**
+   * @param filePath 可选快照路径：传入则持久化（构造时 load，事件后防抖落盘，
+   *   dispose 强制 flush）；不传则纯内存（单测/临时场景）。
+   */
+  constructor(filePath?: string) {
+    this.filePath = filePath
+    if (filePath === undefined) return
+    this.load()
+    // 防抖落盘：会话事件流密集时合并写；2s 间隔 + 退出时强制 flush。
+    this.flushTimer = setInterval(() => this.flush(), 2000)
+  }
+
+  /** 启动恢复：从快照文件重建索引（PC 重启后 headless 派生会话仍可见）。 */
+  private load(): void {
+    try {
+      const raw = readFileSync(this.filePath as string, 'utf8')
+      const parsed = JSON.parse(raw) as Array<IndexedSession>
+      if (!Array.isArray(parsed)) return
+      for (const s of parsed) {
+        if (s?.sessionId !== undefined && s?.phase !== undefined) {
+          this.sessions.set(s.sessionId, s)
+        }
+      }
+      process.stderr.write(`[kestra-sync] session index restored: ${this.sessions.size} sessions from ${this.filePath}\n`)
+    } catch (err) {
+      // 首次运行或快照损坏：静默空索引（web 会话仍经恢复通告重建）。
+      process.stderr.write(`[kestra-sync] session index load skipped: ${String(err)}\n`)
+    }
+  }
+
+  private scheduleFlush(): void {
+    this.dirty = true
+  }
+
+  /** 落盘（原子：tmp + rename）。失败保留脏标记，下个周期重试。 */
+  private flush(): void {
+    if (!this.dirty || this.filePath === undefined) return
+    this.dirty = false
+    try {
+      const tmp = `${this.filePath}.tmp`
+      writeFileSync(tmp, JSON.stringify([...this.sessions.values()]), 'utf8')
+      renameSync(tmp, this.filePath)
+    } catch (err) {
+      process.stderr.write(`[kestra-sync] session index flush failed: ${String(err)}\n`)
+      this.dirty = true
+    }
+  }
+
+  /** 停止定时器并强制落盘（插件 dispose/进程退出路径）。 */
+  dispose(): void {
+    if (this.flushTimer !== undefined) {
+      clearInterval(this.flushTimer)
+      this.flushTimer = undefined
+    }
+    this.flush()
+  }
 
   /** 观测入口：会话创建/事件驱动，阶段按事件日志末尾推导。 */
   upsert(session: MirrorSession): void {
@@ -638,6 +700,7 @@ export class SessionIndex {
       summary: String(state.prompt ?? '（无摘要）').slice(0, 90),
       state,
     })
+    this.scheduleFlush()
   }
 
   /** 会话列表（按 updatedAt 倒序），供 session.list 应答。 */
@@ -675,6 +738,7 @@ export class SessionIndex {
         ...(prev?.state ?? {}),
       },
     })
+    this.scheduleFlush()
   }
 }
 
