@@ -332,6 +332,8 @@ export class KestraSessionSyncClient {
     onFirstLogin?: (sub: string) => void,
     options?: {
       approvalHandler?: (decision: { sessionId: string; approved: boolean; comment?: string }) => void | Promise<void>
+      /** 会话查询（session.query）处理器：从中台转发的列表/详情请求应答。 */
+      queryHandler?: (query: { requestId: string; type: string; sessionId?: string }) => void | Promise<void>
     },
   ): () => void {
     if (this.inputSseReading) return () => this.stopInputSse()
@@ -371,7 +373,7 @@ export class KestraSessionSyncClient {
             }
           }
           backoffMs = 1_000 // 连接成功重置退避
-          await this.readInputSse(response.body, handler, options?.approvalHandler)
+          await this.readInputSse(response.body, handler, options?.approvalHandler, options?.queryHandler)
         } catch (error) {
           if (!this.inputSseReading) break
           process.stderr.write(`[kestra-sync] relay SSE disconnected: ${String(error instanceof Error ? error.message : error)} — reconnect in ${backoffMs}ms\n`)
@@ -396,6 +398,7 @@ export class KestraSessionSyncClient {
     body: ReadableStream<Uint8Array>,
     handler: (input: RemoteInput) => void | Promise<void>,
     approvalHandler?: (decision: { sessionId: string; approved: boolean; comment?: string }) => void | Promise<void>,
+    queryHandler?: (query: { requestId: string; type: string; sessionId?: string }) => void | Promise<void>,
   ): Promise<void> {
     const reader = body.getReader()
     const decoder = new TextDecoder()
@@ -431,6 +434,14 @@ export class KestraSessionSyncClient {
                 approved: data.approved === true,
                 ...(data.comment === undefined ? {} : { comment: String(data.comment) }),
               })
+            } else if (type === 'session.query') {
+              await queryHandler?.({
+                requestId: String(data.requestId ?? ''),
+                type: String(data.type ?? ''),
+                ...(data.sessionId === undefined || data.sessionId === null || String(data.sessionId) === ''
+                  ? {}
+                  : { sessionId: String(data.sessionId) }),
+              })
             }
             // heartbeat / pc.status / session.result / session.approval：PC 订阅端不消费
           } catch {
@@ -440,6 +451,30 @@ export class KestraSessionSyncClient {
       }
     } finally {
       reader.releaseLock()
+    }
+  }
+
+  /**
+   * 会话查询结果回填（选项 B）：PC 应答中台转发的 session.query，POST 回
+   * relay/query-result 缓存，Phone 轮询取走。失败静默（Phone 侧回落本地缓存）。
+   */
+  async fillQueryResult(requestId: string, type: string, payload: unknown, error?: string): Promise<void> {
+    if (requestId === '' || requestId === undefined) return
+    const token = await this.bearerToken().catch(() => undefined)
+    if (token === undefined) return
+    const body = { requestId, type, payload, ...(error === undefined ? {} : { error }) }
+    try {
+      await this.fetchImpl(
+        `${this.config.baseUrl.replace(/\/+$/, '')}/api/v1/dsh/relay/query-result`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(this.config.timeoutMs ?? 5000),
+        },
+      )
+    } catch {
+      // 回填失败静默：Phone 侧下轮查询/本地缓存兜底。
     }
   }
 
@@ -691,4 +726,82 @@ export class SessionMirror {
       process.stderr.write(`[kestra-sync] session mirror push failed (${String(result.status)}): ${sessionId} -> ${phase}\n`)
     }
   }
+}
+
+/**
+ * 本地会话索引（选项 B 查询面）：PC 端已见会话的内存索引，应答中台转发的
+ * session.query（列表/详情）——会话数据权威在 PC 本地（边端权威），不落中台。
+ * 观测入口与 SessionMirror 相同（session/created、session/event），但不推 Kestra；
+ * 重启后经恢复通告（session/created，日志已回放）重建索引。
+ */
+export class SessionIndex {
+  private readonly sessions = new Map<string, IndexedSession>()
+
+  /** 观测入口：会话创建/事件驱动，阶段按事件日志末尾推导。 */
+  upsert(session: MirrorSession): void {
+    if (session.header.parentSession !== undefined) return
+    const sessionId = wireSessionId(session.id)
+    if (sessionId === undefined) return
+    const events = session.events ?? session.snapshotEvents?.() ?? []
+    const phase = deriveSessionPhaseFromLog(events) ?? 'running'
+    const state = { source: 'dsh-pc-web', ...foldSyncState(session.deriveMessages?.() ?? []) }
+    const now = new Date().toISOString()
+    const prev = this.sessions.get(sessionId)
+    this.sessions.set(sessionId, {
+      sessionId,
+      phase,
+      pendingInput: false,
+      createdAt: prev?.createdAt ?? now,
+      updatedAt: now,
+      summary: String(state.prompt ?? '（无摘要）').slice(0, 90),
+      state,
+    })
+  }
+
+  /** 会话列表（按 updatedAt 倒序），供 session.list 应答。 */
+  list(): Array<Record<string, unknown>> {
+    return [...this.sessions.values()]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map(s => ({ ...s }))
+  }
+
+  /** 会话详情，供 session.detail 应答。 */
+  get(sessionId: string): Record<string, unknown> | undefined {
+    const s = this.sessions.get(sessionId)
+    return s === undefined ? undefined : { ...s }
+  }
+
+  /**
+   * 记录 headless 执行结果（远程指令派生会话的事件在子进程内，web 观测不到，
+   * 由 executeRemoteInput 终态回调写入本索引）。同 id 时以最新结果覆盖并保留既有 state。
+   */
+  record(info: { sessionId: string; phase: string; prompt: string; result?: string; parentSessionId?: string }): void {
+    const now = new Date().toISOString()
+    const prev = this.sessions.get(info.sessionId)
+    this.sessions.set(info.sessionId, {
+      sessionId: info.sessionId,
+      phase: info.phase,
+      pendingInput: false,
+      createdAt: prev?.createdAt ?? now,
+      updatedAt: now,
+      summary: String(info.prompt ?? '（无摘要）').slice(0, 90),
+      state: {
+        source: 'dsh-pc-web',
+        prompt: info.prompt,
+        ...(info.result === undefined ? {} : { result: info.result }),
+        ...(info.parentSessionId === undefined ? {} : { parentSessionId: info.parentSessionId }),
+        ...(prev?.state ?? {}),
+      },
+    })
+  }
+}
+
+interface IndexedSession {
+  sessionId: string
+  phase: string
+  pendingInput: boolean
+  createdAt: string
+  updatedAt: string
+  summary: string
+  state: Record<string, unknown>
 }

@@ -16,6 +16,7 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-session'
 import {
   KestraSessionSyncClient,
+  SessionIndex,
   SessionMirror,
   decideInputTarget,
   type KestraSyncConfig,
@@ -168,6 +169,7 @@ async function executeRemoteInput(
   client: KestraSessionSyncClient,
   input: RemoteInput,
   options: { timeoutSeconds: number; selection?: (() => { provider: string; model: string } | undefined) | undefined },
+  onExecuted?: (info: { sessionId: string; phase: string; prompt: string; result?: string; parentSessionId?: string }) => void,
 ): Promise<void> {
   const sessions = await client.listOwnedSessions(50).catch(() => [] as Array<Record<string, unknown>>)
   const parent = sessions.find(s => String(s.sessionId ?? '') === input.sessionId)
@@ -277,6 +279,14 @@ async function executeRemoteInput(
       userId: client.currentSub(),
     })
     process.stderr.write(`[kestra-sync] remote input executed: session=${sessionId} exit=${exitCode}\n`)
+    // 选项 B 查询面：headless 派生会话的结果写入本地索引（web 观测不到子进程事件）。
+    onExecuted?.({
+      sessionId,
+      phase: exitCode === 0 ? 'completed' : 'failed',
+      prompt: input.text,
+      ...(answer === '' ? {} : { result: answer }),
+      ...(target.kind === 'fork' && input.sessionId !== undefined && input.sessionId !== '' ? { parentSessionId: input.sessionId } : {}),
+    })
     // §3.3 指标事件：会话终态旁路上报（轻量聚合，不含会话全文）
     void client.reportMetric({
       type: 'session_end',
@@ -368,16 +378,38 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
         return executeRemoteInput(client, input, {
           timeoutSeconds: config.remoteInputTimeoutSeconds ?? 300,
           selection,
+        }, (info) => {
+          // headless 派生会话写入本地索引（选项 B 查询面）。
+          index.record(info)
         })
       })
       .catch(() => {})
     return chain.p
   }
 
+  // 本地会话索引（选项 B 查询面）：应答中台转发的 session.query（列表/详情）。
+  // 与 SessionMirror 同源观测（session/created、session/event），数据权威在 PC 本地。
+  const index = new SessionIndex()
+  ctx.on('session/created', (session) => { index.upsert(session) })
+  ctx.on('session/event', (session) => { index.upsert(session) })
+
+  // 查询应答：session.list → 索引列表；session.detail → 索引详情（未命中回填 error）。
+  const handleQuery = (query: { requestId: string; type: string; sessionId?: string }): Promise<void> => {
+    process.stderr.write(`[kestra-sync] query received: ${query.type} rid=${query.requestId}${query.sessionId ? ` sid=${query.sessionId}` : ''}\n`)
+    if (query.type === 'session.detail' && query.sessionId !== undefined) {
+      const detail = index.get(query.sessionId)
+      return detail === undefined
+        ? client.fillQueryResult(query.requestId, query.type, undefined, 'session not found on PC')
+        : client.fillQueryResult(query.requestId, query.type, detail)
+    }
+    return client.fillQueryResult(query.requestId, query.type, index.list())
+  }
+
   if (config.useSse !== false) {
     client.startInputSse(
       handleRemoteInput,
       sub => process.stderr.write(`[kestra-sync] PC online via SSE as ${sub} — remote inputs will be executed here\n`),
+      { queryHandler: handleQuery },
     )
   } else if (config.pollRemoteInputs) {
     // 轮询兜底（显式 useSse=false）：沿用原有语义，SSE 恢复后切换回主链路由部署配置决定
