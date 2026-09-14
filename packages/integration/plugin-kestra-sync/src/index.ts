@@ -70,7 +70,7 @@ export const Config: z<Config> = z.object({
   queuePath: z.string(),
   remoteInputTimeoutSeconds: z.number(),
   useSse: z.boolean().default(true),
-  mirrorSessions: z.boolean().default(true),
+  mirrorSessions: z.boolean().default(false),
 })
 
 export type * from './core.ts'
@@ -193,14 +193,7 @@ async function executeRemoteInput(
     state.parentSessionId = input.sessionId
     state.forkedFrom = 'COMPLETED/FAILED 会话的手机端输入派生新会话'
   }
-
-  // Create / resume the row with the caller's user identity (owner = token sub)
-  await client.push({
-    sessionId,
-    phase: 'running',
-    state: JSON.stringify(state),
-    userId: client.currentSub(),
-  })
+  // 选项 B：会话数据权威在 PC 本地，不写中台（A 组件 dsh_session 已退役）。
 
   // Generated overlay: model config + kestra-run observer for the result contract.
   // Deliberately WITHOUT kestra-sync — the parent (this plugin) owns Kestra pushes,
@@ -265,19 +258,6 @@ async function executeRemoteInput(
       answer = parsed.result ?? parsed.answer ?? ''
     } catch { /* 无结果文件（超时/崩溃）—— 状态照常落地，供手机端可见 */ }
 
-    const finalState = {
-      ...state,
-      result: answer,
-      durationMs: Date.now() - startedAt,
-      exitCode,
-      timeline: { ...((state.timeline as Record<string, string>) ?? {}), completed: new Date().toISOString() },
-    }
-    await client.push({
-      sessionId,
-      phase: exitCode === 0 ? 'completed' : 'failed',
-      state: JSON.stringify(finalState),
-      userId: client.currentSub(),
-    })
     process.stderr.write(`[kestra-sync] remote input executed: session=${sessionId} exit=${exitCode}\n`)
     // 选项 B 查询面：headless 派生会话的结果写入本地索引（web 观测不到子进程事件）。
     onExecuted?.({
@@ -295,17 +275,21 @@ async function executeRemoteInput(
       durationMs: Date.now() - startedAt,
     })
   } catch (e) {
-    // 兜底：执行器本身抛错也要把会话从 RUNNING 落到 FAILED，手机端才不会永远执行中
-    const failedTimeline = {
-      ...((state.timeline as Record<string, string>) ?? {}),
-      failed: new Date().toISOString(),
-    }
-    await client.push({
+    // 兜底：执行器本身抛错也要把会话落到 FAILED 并留日志（选项 B 不写中台；
+    // 会话状态在 SessionIndex/PC 本地，由 onExecuted 通知查询面）。
+    process.stderr.write(`[kestra-sync] remote input failed: session=${sessionId} error=${String(e)}\n`)
+    onExecuted?.({
       sessionId,
       phase: 'failed',
-      state: JSON.stringify({ ...state, error: String(e), timeline: failedTimeline }),
-      userId: client.currentSub(),
-    }).catch(() => {})
+      prompt: input.text,
+      ...(String(e) === '' ? {} : { result: `执行失败：${String(e).slice(0, 200)}` }),
+    })
+    void client.reportMetric({
+      type: 'session_end',
+      sessionId,
+      outcome: 'failed',
+      durationMs: Date.now() - startedAt,
+    })
   } finally {
     rmSync(tempDir, { recursive: true, force: true })
   }
