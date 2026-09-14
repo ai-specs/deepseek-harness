@@ -93,11 +93,29 @@ export interface PushResult {
   phase: SessionPhase
 }
 
-/** 手机端待处理输入（原子消费后的结果）。 */
+/** 手机端待处理输入（原子消费后的结果；SSE 链路 newSession 标记全新会话）。 */
 export interface RemoteInput {
   sessionId: string
   text: string
   at?: string
+  /** 选项 B：SSE 事件 newSession=true 表示手机端发起全新会话（直接派生新会话）。 */
+  newSession?: boolean
+}
+
+/** §3.3 轻量指标事件（不含会话全文——纯聚合数字，字节级）。 */
+export interface MetricEvent {
+  type: 'session_start' | 'session_end' | 'tool_call' | 'approval_requested' | 'approval_resolved'
+  sessionId: string
+  outcome?: 'completed' | 'failed'
+  durationMs?: number
+  toolCalls?: number
+  toolErrors?: number
+  tool?: string
+  success?: boolean
+  latencyMs?: number
+  approvalType?: string
+  approved?: boolean
+  resolutionMs?: number
 }
 
 /** 纯函数：待处理输入的消费决策 —— 终态会话重新派生新会话，进行中则原地接力。 */
@@ -293,6 +311,167 @@ export class KestraSessionSyncClient {
     if (this.inputTimer !== undefined) {
       clearInterval(this.inputTimer)
       this.inputTimer = undefined
+    }
+  }
+
+  // ---------------------------------------------------------------- option B: SSE + metrics
+
+  private inputSseAbort: AbortController | undefined
+  private inputSseReading = false
+
+  /**
+   * 选项 B 指令接收主链路：SSE 订阅中台 relay/events（GET /api/v1/dsh/relay/events），
+   * 复用本客户端既有 token 缓存/刷新（web-identity 自动续期、PKCE、client_credentials）。
+   *
+   * 事件分发：`session.input` → handler（RemoteInput）；`session.approval.decision` →
+   * options.approvalHandler。连接断开指数退避重连（1s 起 2 倍，封顶 30s；成功接收
+   * 事件后重置）；401 时强制刷新 token 重试一次（S2 token 生命周期）。返回停止函数。
+   */
+  startInputSse(
+    handler: (input: RemoteInput) => void | Promise<void>,
+    onFirstLogin?: (sub: string) => void,
+    options?: {
+      approvalHandler?: (decision: { sessionId: string; approved: boolean; comment?: string }) => void | Promise<void>
+    },
+  ): () => void {
+    if (this.inputSseReading) return () => this.stopInputSse()
+    this.inputSseReading = true
+    const base = this.config.baseUrl.replace(/\/+$/, '')
+    const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+
+    void (async () => {
+      let backoffMs = 1_000
+      let notified = false
+      while (this.inputSseReading) {
+        let controller = new AbortController()
+        this.inputSseAbort = controller
+        try {
+          const token = await this.bearerToken()
+          let response = await this.fetchImpl(
+            `${base}/api/v1/dsh/relay/events`,
+            { headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' }, signal: controller.signal },
+          )
+          // S2：token 失效 → 走既有缓存刷新机制（web-identity/PKCE/client_credentials）强制刷新后重试一次
+          if (response.status === 401) {
+            const fresh = await this.bearerToken(true)
+            controller = new AbortController()
+            this.inputSseAbort = controller
+            response = await this.fetchImpl(
+              `${base}/api/v1/dsh/relay/events`,
+              { headers: { Authorization: `Bearer ${fresh}`, Accept: 'text/event-stream' }, signal: controller.signal },
+            )
+          }
+          if (!response.ok) throw new Error(`relay SSE HTTP ${String(response.status)}`)
+          if (response.body === null) throw new Error('relay SSE body missing')
+          if (onFirstLogin !== undefined && !notified) {
+            const sub = this.currentSub()
+            if (sub) {
+              onFirstLogin(sub)
+              notified = true
+            }
+          }
+          backoffMs = 1_000 // 连接成功重置退避
+          await this.readInputSse(response.body, handler, options?.approvalHandler)
+        } catch (error) {
+          if (!this.inputSseReading) break
+          process.stderr.write(`[kestra-sync] relay SSE disconnected: ${String(error instanceof Error ? error.message : error)} — reconnect in ${backoffMs}ms\n`)
+          await sleep(backoffMs)
+          backoffMs = Math.min(backoffMs * 2, 30_000)
+        } finally {
+          this.inputSseAbort = undefined
+        }
+      }
+    })()
+
+    return () => this.stopInputSse()
+  }
+
+  private stopInputSse(): void {
+    this.inputSseReading = false
+    this.inputSseAbort?.abort()
+  }
+
+  /** SSE 流解析（`\n\n` 分帧、`data:` 行 JSON），按 §5.3 事件表分发。 */
+  private async readInputSse(
+    body: ReadableStream<Uint8Array>,
+    handler: (input: RemoteInput) => void | Promise<void>,
+    approvalHandler?: (decision: { sessionId: string; approved: boolean; comment?: string }) => void | Promise<void>,
+  ): Promise<void> {
+    const reader = body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) return
+        buffer += decoder.decode(value, { stream: true })
+        let frameEnd: number
+        while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, frameEnd)
+          buffer = buffer.slice(frameEnd + 2)
+          const dataLine = frame.split('\n').find(line => line.startsWith('data:'))
+          if (dataLine === undefined) continue
+          const payload = dataLine.slice(5).trim()
+          if (payload === '') continue
+          try {
+            const event = JSON.parse(payload) as { event?: string; id?: string; data?: Record<string, unknown> }
+            const type = event.event ?? ''
+            const data = event.data
+            if (data === undefined) continue
+            if (type === 'session.input') {
+              await handler({
+                sessionId: String(data.sessionId ?? ''),
+                text: String(data.text ?? ''),
+                newSession: data.newSession === true,
+                at: new Date().toISOString(),
+              })
+            } else if (type === 'session.approval.decision') {
+              await approvalHandler?.({
+                sessionId: String(data.sessionId ?? ''),
+                approved: data.approved === true,
+                ...(data.comment === undefined ? {} : { comment: String(data.comment) }),
+              })
+            }
+            // heartbeat / pc.status / session.result / session.approval：PC 订阅端不消费
+          } catch {
+            // 非 JSON 帧（注释/空帧）忽略
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  }
+
+  /**
+   * §3.3 指标事件上报 → POST /api/v1/dsh/metrics（复用现有 report 端点，写 dsh_metrics
+   * 聚合表；不落会话全文）。本轮只实现 session_end 会话级聚合（tool_call/approval 级
+   * 事件后续随 PC Agent 工具面接入）。上报失败不阻断主链路。
+   */
+  async reportMetric(metric: MetricEvent): Promise<void> {
+    if (metric.type !== 'session_end') return
+    const token = await this.bearerToken().catch(() => undefined)
+    if (token === undefined) return
+    const body = {
+      sessionId: metric.sessionId,
+      userId: this.currentSub(),
+      taskCompletionRate: metric.outcome === 'completed' ? 1.0 : 0.0,
+      toolErrorRate: (metric.toolCalls ?? 0) > 0 ? (metric.toolErrors ?? 0) / (metric.toolCalls ?? 1) : 0.0,
+      p99LatencyMs: metric.durationMs ?? 0,
+      tokenUsage: 0,
+    }
+    try {
+      await this.fetchImpl(
+        `${this.config.baseUrl.replace(/\/+$/, '')}/api/v1/dsh/metrics`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(this.config.timeoutMs ?? 5000),
+        },
+      )
+    } catch {
+      // 指标上报失败不阻塞主链路（日志可观测由调用方补）
     }
   }
 
