@@ -14,8 +14,6 @@ import {
 } from '../src/pkce.ts'
 import {
   decideInputTarget,
-  KestraSessionSyncClient,
-  type KestraSyncConfig,
 } from '../src/core.ts'
 
 const tempDir = mkdtempSync(join(tmpdir(), 'pkce-test-'))
@@ -167,78 +165,11 @@ describe('PkceTokenProvider', () => {
 })
 
 describe('remote input consumption (dsh.docx PC 离线行为)', () => {
-  const baseConfig: KestraSyncConfig = {
-    baseUrl: 'http://kestra:8080',
-    token: 't0k3n',
-  }
-
   it('forks terminal sessions and resumes live ones', () => {
     const fork = decideInputTarget({ sessionId: 's-done', phase: 'COMPLETED', pendingInput: 'hi' })
     expect(fork.kind).toBe('fork')
     expect(fork.kind === 'fork' && fork.newSessionId).not.toBe('s-done')
     const resume = decideInputTarget({ sessionId: 's-live', phase: 'RUNNING', pendingInput: 'hi' })
     expect(resume).toEqual({ kind: 'resume', sessionId: 's-live' })
-  })
-
-  it('consumes pending inputs atomically and skips sessions without them', async () => {
-    const fetchImpl = vi.fn().mockImplementation(async (url: unknown, init?: RequestInit) => {
-      const target = String(url)
-      if (target.endsWith('/api/v1/dsh/sessions?limit=50')) {
-        return new Response(JSON.stringify([
-          { sessionId: 's-1', phase: 'RUNNING', pendingInput: '帮我查订单' },
-          { sessionId: 's-2', phase: 'RUNNING' },
-        ]), { status: 200 })
-      }
-      if (target.endsWith('/s-1/input/consume')) {
-        expect((init as RequestInit).method).toBe('POST')
-        return new Response(JSON.stringify({ text: '帮我查订单', at: '2026-09-02T00:00:00Z' }), { status: 200 })
-      }
-      if (target.endsWith('/s-2/input/consume')) {
-        return new Response(JSON.stringify({ text: null }), { status: 200 })
-      }
-      return new Response(null, { status: 404 })
-    })
-    const client = new KestraSessionSyncClient(baseConfig, fetchImpl as unknown as typeof fetch)
-    const consumed = await client.pollRemoteInputsOnce()
-    expect(consumed).toEqual([{ sessionId: 's-1', text: '帮我查订单', at: '2026-09-02T00:00:00Z' }])
-    client.dispose()
-  })
-
-  it('creates a fresh session row for a forked input (owner from the user token)', async () => {
-    const pushed: Array<Record<string, unknown>> = []
-    const fetchImpl = vi.fn().mockImplementation(async (url: unknown) => {
-      const target = String(url)
-      if (target.endsWith('/oidc/token')) {
-        return new Response(JSON.stringify({ access_token: 'user-tok', expires_in: 3600 }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      if (target.endsWith('/api/v1/dsh/sessions?limit=50')) {
-        return new Response(JSON.stringify([
-          { sessionId: 'done-1', phase: 'COMPLETED', pendingInput: '再来一次' },
-        ]), { status: 200 })
-      }
-      if (target.endsWith('/done-1/input/consume')) {
-        return new Response(JSON.stringify({ text: '再来一次' }), { status: 200 })
-      }
-      if (/\/api\/v1\/dsh\/sessions\/[0-9a-f-]{36}$/.test(target)) {
-        // PUT upsert — capture it through the push path
-        return new Response(JSON.stringify({ ok: true }), { status: 200 })
-      }
-      return new Response(null, { status: 404 })
-    })
-    const client = new KestraSessionSyncClient(
-      { ...baseConfig, clientId: 'dsh', clientSecret: 's' },
-      fetchImpl as unknown as typeof fetch,
-    )
-    const inputs = await client.pollRemoteInputsOnce()
-    expect(inputs).toHaveLength(1)
-    const target = decideInputTarget({ sessionId: 'done-1', phase: 'COMPLETED' })
-    if (target.kind === 'fork') {
-      await client.push({ sessionId: target.newSessionId, phase: 'running', state: JSON.stringify({ prompt: inputs[0]!.text }) })
-      pushed.push({ sessionId: target.newSessionId })
-    }
-    expect(target.kind).toBe('fork')
-    expect(pushed[0]!.sessionId).toMatch(/[0-9a-f-]{36}/)
-    client.dispose()
   })
 })

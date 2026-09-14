@@ -24,7 +24,7 @@ describe('kestra-sync auth=web-identity', () => {
     const { client, ensure } = handle(fetchImpl as unknown as typeof fetch)
     expect(client.currentSub()).toBe('alice@kestra.io')
 
-    await client.listOwnedSessions(5)
+    await client.push({ sessionId: 's-1', phase: 'completed', state: '{}' })
     expect(ensure).toHaveBeenCalled()
     const call = fetchImpl.mock.calls[0]
     if (call === undefined) throw new Error('fetch was not called')

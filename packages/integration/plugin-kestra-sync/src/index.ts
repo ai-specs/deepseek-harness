@@ -17,7 +17,6 @@ import type {} from '@deepseek-ai/dsh-session'
 import {
   KestraSessionSyncClient,
   SessionIndex,
-  SessionMirror,
   decideInputTarget,
   type KestraSyncConfig,
   type RemoteInput,
@@ -40,10 +39,8 @@ export interface Config extends KestraSyncConfig {
   queuePath?: string
   /** 手机输入接力执行的超时秒数（默认 300）。 */
   remoteInputTimeoutSeconds?: number
-  /** 选项 B：SSE 指令接收主链路（默认 true）。false 时回退轮询（pollRemoteInputs）。 */
+  /** 选项 B：SSE 指令接收主链路（默认 true）。false 时 PC 不接入中台（无降级轮询——A 组件已退役）。 */
   useSse?: boolean
-  /** 全量会话镜像（选项 A 组件，默认 true 灰度保留；App 切换 relay 后置 false 退役）。 */
-  mirrorSessions?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -61,8 +58,6 @@ export const Config: z<Config> = z.object({
     scopes: z.array(z.string()),
     cachePath: z.string(),
   }),
-  pollRemoteInputs: z.boolean(),
-  pollIntervalMs: z.number(),
   tenant: z.string(),
   mode: z.union(['realtime', 'batch']),
   batchIntervalMs: z.number(),
@@ -70,7 +65,6 @@ export const Config: z<Config> = z.object({
   queuePath: z.string(),
   remoteInputTimeoutSeconds: z.number(),
   useSse: z.boolean().default(true),
-  mirrorSessions: z.boolean().default(false),
 })
 
 export type * from './core.ts'
@@ -168,18 +162,23 @@ export function resolveRelayModel(
 async function executeRemoteInput(
   client: KestraSessionSyncClient,
   input: RemoteInput,
-  options: { timeoutSeconds: number; selection?: (() => { provider: string; model: string } | undefined) | undefined },
+  options: {
+    timeoutSeconds: number
+    selection?: (() => { provider: string; model: string } | undefined) | undefined
+    getPhase?: (sessionId: string) => string | undefined
+  },
   onExecuted?: (info: { sessionId: string; phase: string; prompt: string; result?: string; parentSessionId?: string }) => void,
 ): Promise<void> {
-  const sessions = await client.listOwnedSessions(50).catch(() => [] as Array<Record<string, unknown>>)
-  const parent = sessions.find(s => String(s.sessionId ?? '') === input.sessionId)
+  // 选项 B：父会话 phase 从 PC 本地会话索引读取（会话数据权威在 PC，中台无会话存储；
+  // 索引未命中（如会话不在本端）→ 按 RUNNING 处理，由服务端/对端语义兜底）。
+  const parentPhase = options.getPhase?.(input.sessionId ?? '')
   // 选项 B：SSE newSession=true（手机端发起全新会话）→ 直接派生新会话，不查父会话 phase；
   // 否则沿用 decideInputTarget（终态派生新会话、进行中原地接力）。
   const target = input.newSession === true
     ? { kind: 'fork' as const, sessionId: input.sessionId, newSessionId: randomUUID() }
     : decideInputTarget({
       sessionId: input.sessionId,
-      phase: String(parent?.phase ?? 'RUNNING'),
+      phase: parentPhase ?? 'RUNNING',
     })
   const sessionId = target.kind === 'fork' ? target.newSessionId : input.sessionId
 
@@ -362,6 +361,8 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
         return executeRemoteInput(client, input, {
           timeoutSeconds: config.remoteInputTimeoutSeconds ?? 300,
           selection,
+          // 追问的父会话 phase 从本地索引读取（会话数据权威在 PC）。
+          getPhase: sessionId => String(index.get(sessionId)?.phase ?? '') || undefined,
         }, (info) => {
           // headless 派生会话写入本地索引（选项 B 查询面）。
           index.record(info)
@@ -395,12 +396,8 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       sub => process.stderr.write(`[kestra-sync] PC online via SSE as ${sub} — remote inputs will be executed here\n`),
       { queryHandler: handleQuery },
     )
-  } else if (config.pollRemoteInputs) {
-    // 轮询兜底（显式 useSse=false）：沿用原有语义，SSE 恢复后切换回主链路由部署配置决定
-    client.startInputPoller(
-      handleRemoteInput,
-      sub => process.stderr.write(`[kestra-sync] PC online (poll fallback) as ${sub} — remote inputs will be executed here\n`),
-    )
+  } else {
+    process.stderr.write('[kestra-sync] useSse=false：PC 不接入中台（轮询降级已随 A 组件退役）\n')
   }
   return client
 }
@@ -433,22 +430,10 @@ export function apply(ctx: Context, config: Config): KestraSessionSyncClient | u
       warnDaemonConflict()
       const client = new KestraSessionSyncClient(config, fetch, Date.now, identityCtx.webIdentity)
       started = mountClient(identityCtx, config, client)
-      // 全量会话镜像（选项 A 组件）：默认灰度保留（App 侧仍读 dsh_session）；
-      // App 切到 relay/本地缓存后置 mirrorSessions=false 退役（roadmap #6/#11）。
-      if (config.mirrorSessions !== false) {
-        mountSessionMirror(identityCtx, client)
-      }
     })
     return started
   }
   return mountClient(ctx, config, new KestraSessionSyncClient(config))
-}
-
-/** A10 ①：本地会话镜像 —— PC 端创建的会话推 Kestra dsh_session（手机端同 sub 可见）。 */
-function mountSessionMirror(ctx: Context, client: KestraSessionSyncClient): void {
-  const mirror = new SessionMirror(client)
-  ctx.on('session/created', (session) => { mirror.onCreated(session) })
-  ctx.on('session/event', (session, event) => { mirror.onEvent(session, event) })
 }
 
 export { executeRemoteInput }

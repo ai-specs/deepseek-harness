@@ -47,13 +47,6 @@ export interface KestraSyncConfig {
   auth?: 'client_credentials' | 'pkce' | 'web-identity'
   /** PKCE 登录参数（auth='pkce' 时必填）。 */
   pkce?: PkceConfig
-  /**
-   * 消费手机端待处理输入（dsh.docx PC 离线行为）：轮询本用户名下会话的
-   * pending_input，原子消费后交给 handler 执行。开启后 PC 在线即接力处理手机输入。
-   */
-  pollRemoteInputs?: boolean
-  /** 输入轮询间隔毫秒（默认 5000）。 */
-  pollIntervalMs?: number
   /** Tenant used for the API path (Kestra 2.x multi-tenancy) */
   tenant?: string
   /** realtime pushes immediately; batch coalesces snapshots per interval */
@@ -172,7 +165,6 @@ export class KestraSessionSyncClient {
   private readonly queue: SessionSnapshot[] = []
   private timer: ReturnType<typeof setInterval> | undefined
   private inFlight = false
-  private inputTimer: ReturnType<typeof setInterval> | undefined
 
   private readonly queuePath: string
 
@@ -240,79 +232,6 @@ export class KestraSessionSyncClient {
   }
 
   // ---------------------------------------------------------------- remote inputs
-
-  /** 列出本用户名下会话（Kestra 端按 token sub 过滤 —— 跨用户隔离由服务端保证）。 */
-  async listOwnedSessions(limit = 50): Promise<Array<Record<string, unknown>>> {
-    const token = await this.bearerToken()
-    const response = await this.fetchImpl(
-      `${this.config.baseUrl.replace(/\/+$/, '')}/api/v1/dsh/sessions?limit=${limit}`,
-      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(this.config.timeoutMs ?? 5000) },
-    )
-    if (!response.ok) throw new Error(`list sessions failed (${response.status})`)
-    return (await response.json()) as Array<Record<string, unknown>>
-  }
-
-  /** 原子消费一条待处理输入（服务端 UPDATE..RETURNING，并发安全）。 */
-  async consumePendingInput(sessionId: string): Promise<RemoteInput | undefined> {
-    const token = await this.bearerToken()
-    const response = await this.fetchImpl(
-      `${this.config.baseUrl.replace(/\/+$/, '')}/api/v1/dsh/sessions/${encodeURIComponent(sessionId)}/input/consume`,
-      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(this.config.timeoutMs ?? 5000) },
-    )
-    if (!response.ok) return undefined
-    const payload = (await response.json()) as { text?: string | null; at?: string }
-    if (!payload.text) return undefined
-    return payload.at === undefined
-      ? { sessionId, text: payload.text }
-      : { sessionId, text: payload.text, at: payload.at }
-  }
-
-  /**
-   * 轮询一次：找所有带 pending_input 的会话并逐条原子消费。
-   * 返回消费到的输入（调用方决定如何执行 —— 默认由插件 spawn headless dsh 接力）。
-   */
-  async pollRemoteInputsOnce(): Promise<RemoteInput[]> {
-    const sessions = await this.listOwnedSessions()
-    const consumed: RemoteInput[] = []
-    for (const session of sessions) {
-      if (!session.pendingInput) continue
-      const sessionId = String(session.sessionId ?? '')
-      const input = await this.consumePendingInput(sessionId)
-      if (input) consumed.push(input)
-    }
-    return consumed
-  }
-
-  /**
-   * 启动待处理输入轮询（dsh.docx：PC 掉线期间手机输入保持待处理，上线后接力执行）。
-   * 返回停止函数。消费失败（网络/未登录）静默，下个周期重试。
-   */
-  startInputPoller(handler: (input: RemoteInput) => void | Promise<void>, onFirstLogin?: (sub: string) => void): () => void {
-    if (this.inputTimer !== undefined) return () => this.stopInputPoller()
-    this.inputTimer = setInterval(() => {
-      void (async () => {
-        try {
-          const inputs = await this.pollRemoteInputsOnce()
-          if (onFirstLogin) {
-            const sub = this.currentSub()
-            if (sub) (onFirstLogin as (s: string) => void)(sub)
-          }
-          for (const input of inputs) await handler(input)
-        } catch {
-          // 未登录（无缓存票）时 PKCE getToken 会尝试弹浏览器 —— 每个周期只尝试一次并静默失败，
-          // 避免轮询风暴；用户完成登录后自然恢复。
-        }
-      })()
-    }, this.config.pollIntervalMs ?? 5000)
-    return () => this.stopInputPoller()
-  }
-
-  private stopInputPoller(): void {
-    if (this.inputTimer !== undefined) {
-      clearInterval(this.inputTimer)
-      this.inputTimer = undefined
-    }
-  }
 
   // ---------------------------------------------------------------- option B: SSE + metrics
 
@@ -613,7 +532,6 @@ export class KestraSessionSyncClient {
 
   dispose(): void {
     if (this.timer !== undefined) clearInterval(this.timer)
-    this.stopInputPoller()
   }
 }
 
@@ -691,58 +609,11 @@ export function deriveSessionPhaseFromLog(
   return 'running'
 }
 
-/**
- * 本地会话 → Kestra dsh_session 镜像器：PC 端创建的会话推快照，手机端同 sub 即可见
- * （dsh.docx 跨端同步；归属 owner 由服务端按 token sub 强制绑定）。本地 id 按
- * `session-<uuid>` → 裸 uuid 映射上线（Kestra 列强校验 UUID）。只镜像主线会话
- * （fork 派生的 subagent 会话不镜像）；终态推送一次后冻结 —— Kestra 状态机无终态出边，
- * 已完结会话的延续由手机输入接力 fork 新会话承担。
- */
-export class SessionMirror {
-  private readonly terminal = new Set<string>()
-
-  constructor(private readonly client: Pick<KestraSessionSyncClient, 'push' | 'currentSub'>) {}
-
-  /** `session/created` 观测入口：新会话与重启恢复的会话都经此发布；阶段按日志末尾推导。 */
-  onCreated(session: MirrorSession): void {
-    // core Session 不带 `events` 属性（恒 undefined→空日志→兜底 running）；恢复通告
-    // 的真实日志在 snapshotEvents()（resume 路径已把持久化日志作为 seed 灌入）。
-    // 推错 RUNNING 无法自愈：Kestra 状态机无终态出边，安静会话再无事件纠正 → 手机端永远「执行中」。
-    const events = session.events ?? session.snapshotEvents?.() ?? []
-    void this.mirror(session, deriveSessionPhaseFromLog(events))
-  }
-
-  /** `session/event` 观测入口：turn/start、turn/end 驱动阶段迁移。 */
-  onEvent(session: MirrorSession, event: { type: string; data?: unknown }): void {
-    const reason = (event.data as { reason?: { kind?: string } } | undefined)?.reason
-    void this.mirror(session, deriveSyncPhase(event.type, reason?.kind))
-  }
-
-  private async mirror(session: MirrorSession, phase: SessionPhase | undefined): Promise<void> {
-    if (phase === undefined || session.header.parentSession !== undefined) return
-    const sessionId = wireSessionId(session.id)
-    // 非 UUID 形态的本地 id（如 `session-<counter>` 草稿）无法落 Kestra uuid 列，按不可镜像跳过。
-    if (sessionId === undefined) return
-    if (this.terminal.has(sessionId)) return
-    if (phase === 'completed' || phase === 'failed') this.terminal.add(sessionId)
-    const state = { source: 'dsh-pc-web', ...foldSyncState(session.deriveMessages?.() ?? []) }
-    const sub = this.client.currentSub()
-    const result = await this.client.push({
-      sessionId,
-      phase,
-      state: JSON.stringify(state),
-      ...(sub === '' ? {} : { userId: sub }),
-    })
-    if (result !== undefined && !result.ok) {
-      process.stderr.write(`[kestra-sync] session mirror push failed (${String(result.status)}): ${sessionId} -> ${phase}\n`)
-    }
-  }
-}
 
 /**
  * 本地会话索引（选项 B 查询面）：PC 端已见会话的内存索引，应答中台转发的
  * session.query（列表/详情）——会话数据权威在 PC 本地（边端权威），不落中台。
- * 观测入口与 SessionMirror 相同（session/created、session/event），但不推 Kestra；
+ * 观测入口为 session/created、session/event 事件（与既有观测一致），不推中台；
  * 重启后经恢复通告（session/created，日志已回放）重建索引。
  */
 export class SessionIndex {
