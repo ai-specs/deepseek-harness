@@ -403,10 +403,20 @@ export class KestraSessionSyncClient {
     const reader = body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    // 空闲超时：SSE 长连接 TCP 半开（Kestra 端关连接但本端 fetch 流假活）时，
+    // 流既不结束也不报错，read() 永远挂起 → 重连循环出不来。heartbeat 15s，
+    // 45s（3 个心跳周期）无任何数据即主动 abort 触发重连。
+    let lastDataAt = Date.now()
+    const idleGuard = setInterval(() => {
+      if (Date.now() - lastDataAt > 45_000) {
+        this.inputSseAbort?.abort(new Error('relay SSE idle timeout: no data for 45s'))
+      }
+    }, 15_000)
     try {
       for (;;) {
         const { done, value } = await reader.read()
         if (done) return
+        lastDataAt = Date.now()
         buffer += decoder.decode(value, { stream: true })
         let frameEnd: number
         while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
@@ -450,6 +460,7 @@ export class KestraSessionSyncClient {
         }
       }
     } finally {
+      clearInterval(idleGuard)
       reader.releaseLock()
     }
   }
