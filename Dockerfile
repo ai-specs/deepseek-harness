@@ -15,12 +15,15 @@
 
 # ── builder：安装 + 构建 ─────────────────────────────────────────────────────
 FROM node:24-slim AS builder
+# pnpm 11+ 只读 .npmrc（registry 由 .npmrc 决定= npmjs 优先，见文件头注释）；
+# 此 ENV 仅影响 npm/npx（npm pack 拉 native 预编译包）。保持与历史一致以免
+# 使下方 apt 层缓存失效（apt 源在当前网络下不稳，重跑易失败）。
 ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 # 原生依赖编译链：fs-ext（上游 session write-lease）等需要 node-gyp（python3/make/g++）
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmjs.org --fetch-timeout=300000 --fetch-retries=5
 WORKDIR /app
 
 # 工作区安装需要全部 importer 目录在场（packages/*/*、apps/* 等都是 workspace
@@ -38,9 +41,10 @@ COPY apps apps
 # store 走 BuildKit 缓存挂载：COPY 层变化时不重下依赖。
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     (CI=true pnpm install --no-frozen-lockfile --ignore-scripts \
+      --registry=https://registry.npmjs.org \
       --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-maxtimeout=120000 \
   || CI=true pnpm install --no-frozen-lockfile --ignore-scripts \
-      --registry=https://registry.npmmirror.com \
+      --registry=https://registry.npmjs.org \
       --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-maxtimeout=120000)
 # 以下是纯编译输入（非 workspace 成员）：变更只影响缓存到这一层为止
 COPY tsconfig.json tsconfig.base.json tsconfig.host.json tsconfig.client.json tsdown.config.ts ./
@@ -98,9 +102,9 @@ RUN node --input-type=module -e "\
 
 # ── runtime：构建产物 + 启动入口 ─────────────────────────────────────────────
 FROM node:24-slim
-ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org \
     DSH_HOME=/root/.dsh
-RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmjs.org --fetch-timeout=300000 --fetch-retries=5
 WORKDIR /app
 COPY --from=builder /app /app
 ENV PATH="/app/node_modules/.bin:${PATH}"
