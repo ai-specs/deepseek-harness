@@ -175,10 +175,14 @@ async function executeRemoteInput(
   // 选项 B：父会话 phase 从 PC 本地会话索引读取（会话数据权威在 PC，中台无会话存储；
   // 索引未命中（如会话不在本端）→ 按 RUNNING 处理，由服务端/对端语义兜底）。
   const parentPhase = options.getPhase?.(input.sessionId ?? '')
-  // 选项 B：SSE newSession=true（手机端发起全新会话）→ 直接派生新会话，不查父会话 phase；
-  // 否则沿用 decideInputTarget（终态派生新会话、进行中原地接力）。
+  // 选项 B：SSE newSession=true（手机端发起全新会话）——手机端携带 sessionId 时
+  // 直接采纳（方案 C 2026-09-15：新会话 id 由手机端生成、PC 接受——发送即关联，
+  // 手机端无需靠列表匹配回学 id）；未携带（兼容旧端/未发送队列老数据）回退 PC
+  // 派生新 id。追问（newSession=false）沿用 decideInputTarget（终态派生、进行中原地）。
   const target = input.newSession === true
-    ? { kind: 'fork' as const, sessionId: input.sessionId, newSessionId: randomUUID() }
+    ? (input.sessionId
+      ? { kind: 'resume' as const, sessionId: input.sessionId }
+      : { kind: 'fork' as const, sessionId: input.sessionId, newSessionId: randomUUID() })
     : decideInputTarget({
       sessionId: input.sessionId,
       phase: parentPhase ?? 'RUNNING',
@@ -358,6 +362,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
   // 重复执行；useSse=false 时回退轮询（S1 双通道去重：汇聚同一 executeRemoteInput）。
   const chain: { p: Promise<void> } = { p: Promise.resolve() }
   const handleRemoteInput = (input: RemoteInput): Promise<void> => {
+    process.stderr.write(`[kestra-sync] DIAG input=${JSON.stringify(input)}\n`)
     chain.p = chain.p
       .then(() => {
         applyEnvOverrideOnce()
