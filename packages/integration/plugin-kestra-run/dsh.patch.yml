@@ -1,20 +1,20 @@
-# Kestra AIAgent execution-plane overlay (dsh.docx 第二种运行位置).
+# dsh headless one-shot execution overlay（PC 端 remote-input 派生会话执行面）.
 #
 # Applied on top of the headless profile (`dsh --profile headless --patch
-# …/dsh.patch.yml "<task>"`), it turns the one-shot run into the container
-# contract the io.kestra.plugin.dsh.agent.AIAgent task drives:
+# …/dsh.patch.yml "<task>"`), it turns the one-shot run into the structured
+# result contract kestra-sync reads for relay reporting:
 #   - DSH_MODEL / DSH_PROVIDER select the model without editing config files;
 #   - DSH_TOOLS (comma-separated) becomes a deny-by-default tool allowlist;
 #   - DSH_MAX_ITERATIONS bounds the ReAct turn budget (tool calls beyond it are
 #     denied with a wrap-up instruction, so the turn still closes with an answer);
-#   - DSH_OUTPUT_FILE receives the structured result JSON the Java task reads;
+#   - DSH_OUTPUT_FILE receives the structured result JSON kestra-sync reads;
 #   - DSH_TIMEOUT bounds the process (the observer exits 124 on expiry).
 #
 # The overlay inserts ONE row and patches ONE existing row — no upstream
 # plugin file is modified. NOTE: keep the !!js expressions single-line (the
 # patch YAML parser rejects multi-line scalars). bin/dsh-run.mjs generates the
 # same overlay with an absolute file-URL plugin name — keep both in sync.
-# 本文件保持 env 驱动（Kestra AIAgent 容器 DSH_HOME 全新、无 user layer，env 合法生效）；
+# 本文件保持 env 驱动（headless 容器 DSH_HOME 全新、无 user layer，env 合法生效）；
 # PC 手机输入接力平面（plugin-kestra-sync）的 overlay 在生成时写死具体值
 # （env > agentDefaultModel.currentSelection() > 历史默认），见该插件的 resolveRelayModel。
 

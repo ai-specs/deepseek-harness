@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-plugin-kestra-run",
-  "description": "Kestra AIAgent execution-plane one-shot observer: env-driven model/tool selection, tool allowlist guard, and the structured /result.json contract the Kestra AIAgent task reads",
+  "description": "dsh headless one-shot observer (PC 端 remote-input 派生会话): env-driven model/tool selection, tool allowlist guard, and the structured result contract for kestra-sync reporting",
   "version": "0.1.5-rc.2",
   "type": "module",
   "bin": {

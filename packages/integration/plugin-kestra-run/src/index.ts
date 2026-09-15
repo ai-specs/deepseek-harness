@@ -1,12 +1,12 @@
 /**
- * Kestra AIAgent execution-plane observer (dsh.docx 第二种运行位置).
+ * dsh headless one-shot observer（PC 端 remote-input 派生会话执行面）.
  *
  * Rides over the headless one-shot driver without replacing it: the upstream
  * runner keeps owning stdout and the exit code, while this plugin OBSERVES the
- * same Session feed to build the structured result contract the Kestra
- * io.kestra.plugin.dsh.agent.AIAgent task reads from /result.json, enforces
- * the DSH_TOOLS allowlist through the tools/pre-execute pipeline, and bounds
- * the run with DSH_TIMEOUT.
+ * same Session feed to build the structured result contract kestra-sync
+ * reads from result.json for relay reporting, enforces the DSH_TOOLS
+ * allowlist through the tools/pre-execute pipeline, and bounds the run with
+ * DSH_TIMEOUT.
  *
  * @module @deepseek-ai/dsh-plugin-kestra-run
  */
@@ -27,7 +27,7 @@ export const inject: string[] = []
 
 /** Plugin config resolved from the deployment environment by dsh.patch.yml. */
 export interface Config {
-  /** Where the structured result JSON is written (the AIAgent docker-cp target). */
+  /** Where the structured result JSON is written (kestra-sync relay report target). */
   resultFile: string
   /** Deny-by-default tool allowlist; undefined or empty = deployment default set. */
   allowTools?: string[]
@@ -48,7 +48,7 @@ export const Config: z<Config> = z.object({
   maxIterations: z.number(),
 })
 
-/** The structured result contract (mirrors io.kestra.plugin.dsh.agent.AIAgent.RunResult). */
+/** The structured result contract (read by kestra-sync for relay reporting). */
 export interface RunResultPayload {
   result: string
   success: boolean
@@ -154,7 +154,7 @@ export function projectResult(tallies: RunTallies, timedOut = false): RunResultP
  * Mount the observer: subscribe to the Session feed, install the tool
  * allowlist and iteration-budget guards, and arm the timeout. The upstream
  * headless runner owns stdout and the exit code; this plugin only adds the
- * AIAgent file contract.
+ * structured result file contract.
  */
 export function apply(ctx: Context, config: Config): void {
   const tallies = createTallies()

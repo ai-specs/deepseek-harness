@@ -113,7 +113,7 @@ describe('kestra-run observer', () => {
     expect(result.error).toBe('timed out (partial result)')
   })
 
-  it('writes the result file with the AIAgent JSON contract', () => {
+  it('writes the result file with the structured result contract', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kestra-run-'))
     const file = join(dir, 'result.json')
     const tallies = createTallies()

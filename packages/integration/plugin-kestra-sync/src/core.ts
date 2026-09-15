@@ -38,7 +38,7 @@ export interface KestraSyncConfig {
   clientId?: string
   clientSecret?: string
   /**
-   * 取票方式（默认按提供的凭据自动判定）：client_credentials=服务身份（AIAgent/脚本），
+   * 取票方式（默认按提供的凭据自动判定）：client_credentials=服务身份（dsh 执行面/脚本），
    * pkce=用户身份（Authorization Code + PKCE(S256)，会话归属该用户 OIDC sub ——
    * dsh.docx：用户接入端一律 PKCE，客户端不持 client_secret）；
    * web-identity=web 进程留存身份（auth='web-identity' 时必填 webIdentity 句柄，
