@@ -243,7 +243,7 @@ async function executeRemoteInput(
         { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000 })
       exitCode = result.status ?? (result.error ? 1 : 0)
       if (result.status !== 0) {
-        // 子进程失败要留痕：错误输出进 daemon/插件日志，手机端也能看到 FAILED 会话
+        // 子进程失败要留痕：错误输出进插件日志，手机端也能看到 FAILED 会话
         process.stderr.write(`[kestra-sync] remote input run exit=${result.status}: `
           + `${(result.stderr ?? '').slice(-600)}${(result.stdout ?? '').slice(-200)}\n`)
       }
@@ -409,22 +409,6 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
 }
 
 /**
- * web-identity 模式与 daemon 互斥提醒：daemon 的 PKCE 缓存若属同一用户，
- * 两条 refresh 链会因轮换吊销互相打断（实测）。缓存文件存在即提示——跨进程
- * 无法可靠判定存活，宁可误报也不静默双跑。
- */
-function warnDaemonConflict(): void {
-  const daemonCache = join(homedir(), '.dsh', 'oidc-pkce-token.json')
-  if (!existsSync(daemonCache)) return
-  let sub = ''
-  try {
-    sub = String((JSON.parse(readFileSync(daemonCache, 'utf8')) as { sub?: string }).sub ?? '')
-  } catch { /* 缓存损坏按未知处理 */ }
-  process.stderr.write(`[kestra-sync] WARNING: dsh-kestra-daemon cache present${sub ? ` (sub=${sub})` : ''} — running both revokes each other's refresh tokens; stop the daemon for this user
-`)
-}
-
-/**
  * 已挂载的 client 句柄；web-identity 模式下 webIdentity 注入异步就绪，
  * 同步返回时 client 尚未创建——如实返回 undefined（cordis 不消费 apply 返回值）。
  */
@@ -433,7 +417,6 @@ export function apply(ctx: Context, config: Config): KestraSessionSyncClient | u
     // webIdentity 由 client-connection 在 OIDC 模式下提供；注入就绪后挂载。
     let started: KestraSessionSyncClient | undefined
     ctx.inject(['webIdentity'], (identityCtx) => {
-      warnDaemonConflict()
       const client = new KestraSessionSyncClient(config, fetch, Date.now, identityCtx.webIdentity)
       started = mountClient(identityCtx, config, client)
     })
