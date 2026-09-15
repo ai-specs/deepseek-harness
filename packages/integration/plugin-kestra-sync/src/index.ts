@@ -72,7 +72,7 @@ export const Config: z<Config> = z.object({
 
 export type * from './core.ts'
 export type * from './pkce.ts'
-export { KestraSessionSyncClient, buildSyncRequest, buildTokenRequest, decideInputTarget } from './core.ts'
+export { KestraSessionSyncClient, SessionIndex, buildSyncRequest, buildTokenRequest, decideInputTarget } from './core.ts'
 export { PkceTokenProvider, codeChallenge, buildAuthorizeUrl } from './pkce.ts'
 
 export type { SessionSnapshot, RemoteInput }
