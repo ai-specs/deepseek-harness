@@ -13,14 +13,24 @@ const repoRoot = fileURLToPath(new URL('../../../../../', import.meta.url))
 const decompress = promisify(zstdDecompress)
 
 /** Frame one text or tool response from the local Messages endpoint. */
-function messagesResponse(content: Record<string, unknown>, stopReason: 'end_turn' | 'max_tokens' | 'tool_use'): string {
+function chatCompletionsResponse(content: Record<string, unknown>, finishReason: 'stop' | 'length' | 'tool_calls'): string {
+  // dsh fork: the SDK runtime pins chat-completions (DashScope compatible-mode),
+  // so the keyless mock must speak OpenAI SSE rather than the upstream messages shape.
+  const id = 'chatcmpl-sdk-smoke'
+  const base = { id, object: 'chat.completion.chunk', created: 0, model: 'deepseek-v4-pro' }
+  const delta: Record<string, unknown> = content.type === 'tool_use' ? {
+    tool_calls: [{
+      index: 0,
+      id: content.id,
+      type: 'function',
+      function: { name: content.name, arguments: JSON.stringify(content.input) },
+    }],
+  } : { content: content.text }
   return [
-    { type: 'message_start', message: { id: 'sdk-smoke-response', model: 'deepseek-v4-pro', usage: { input_tokens: 3, output_tokens: 0 } } },
-    { type: 'content_block_start', index: 0, content_block: content },
-    { type: 'content_block_stop', index: 0 },
-    { type: 'message_delta', delta: { stop_reason: stopReason }, usage: { output_tokens: 1 } },
-    { type: 'message_stop' },
-  ].map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
+    `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`,
+    `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: finishReason }] })}\n\n`,
+    'data: [DONE]\n\n',
+  ].join('')
 }
 
 function waitForLine(
@@ -78,7 +88,7 @@ describe('Python SDK dsh profile keyless smoke', () => {
       request.on('end', () => {
         modelRequests.push(JSON.parse(body) as Record<string, unknown>)
         response.writeHead(200, { 'content-type': 'text/event-stream' })
-        response.end(messagesResponse({ type: 'text', text: 'done' }, 'max_tokens'))
+        response.end(chatCompletionsResponse({ type: 'text', text: 'done' }, 'length'))
       })
     })
     await new Promise<void>(resolve => modelServer.listen(0, '127.0.0.1', resolve))
@@ -168,9 +178,9 @@ describe('Python SDK dsh profile keyless smoke', () => {
         },
       })
       expect(modelRequests[0]?.tools).toEqual(expect.any(Array))
-      const tools = modelRequests[0]?.tools as { name?: string }[]
-      const toolNames = tools.map(tool => tool.name)
-      expect(modelRequests[0]?.output_config).toEqual({ effort: 'max' })
+      const tools = modelRequests[0]?.tools as Array<{ function?: { name?: string } }>
+      const toolNames = tools.map(tool => tool.function?.name)
+      expect(modelRequests[0]?.reasoning_effort).toBe('max')
       expect(modelRequests[0]?.max_tokens).toBe(1234)
       expect(toolNames).toEqual(expect.arrayContaining(['read', 'write', 'edit', 'web_fetch', 'web_search']))
       expect(toolNames.includes('str_replace_editor')).toBe(editorEnabled)
@@ -225,12 +235,12 @@ describe('Python SDK dsh profile keyless smoke', () => {
         modelRequests.push(JSON.parse(body) as Record<string, unknown>)
         response.writeHead(200, { 'content-type': 'text/event-stream' })
         const toolCall = editorCalls[modelRequests.length - 1]
-        response.end(messagesResponse(toolCall ? {
+        response.end(chatCompletionsResponse(toolCall ? {
           type: 'tool_use',
           id: `editor-${toolCall.command}`,
           name: 'str_replace_editor',
           input: toolCall,
-        } : { type: 'text', text: 'done' }, toolCall ? 'tool_use' : 'end_turn'))
+        } : { type: 'text', text: 'done' }, toolCall ? 'tool_calls' : 'stop'))
       })
     })
     await new Promise<void>(resolve => modelServer.listen(0, '127.0.0.1', resolve))
@@ -297,8 +307,8 @@ describe('Python SDK dsh profile keyless smoke', () => {
         patchReload: 'startup',
       })
       expect(modelRequests[0]?.tools).toEqual(expect.any(Array))
-      const tools = modelRequests[0]?.tools as { name?: string }[]
-      expect(tools.map(tool => tool.name)).toEqual([
+      const tools = modelRequests[0]?.tools as Array<{ function?: { name?: string } }>
+      expect(tools.map(tool => tool.function?.name)).toEqual([
         process.platform === 'win32' ? 'pwsh' : 'bash',
         ...(editorEnabled ? ['str_replace_editor'] : []),
       ])
@@ -307,16 +317,9 @@ describe('Python SDK dsh profile keyless smoke', () => {
         expect(await readFile(editorFile, 'utf8')).toBe(editorContent)
         expect(modelRequests[2]?.messages).toEqual(expect.arrayContaining([
           expect.objectContaining({
-            role: 'user',
-            content: expect.arrayContaining([
-              expect.objectContaining({
-                type: 'tool_result',
-                tool_use_id: 'editor-view',
-                content: expect.arrayContaining([
-                  { type: 'text', text: expect.stringContaining(editorContent.trim()) as unknown },
-                ]) as unknown,
-              }),
-            ]) as unknown,
+            role: 'tool',
+            tool_call_id: 'editor-view',
+            content: expect.stringContaining(editorContent.trim()),
           }),
         ]))
       }

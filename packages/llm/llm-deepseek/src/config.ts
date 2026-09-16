@@ -78,7 +78,10 @@ const catalogModel: z<DeepSeekCatalogModel> = z.object({
 })
 
 export const Config: z<Config> = z.object({
-  protocol: z.union(['chat-completions', 'messages']).default('messages'),
+  // dsh fork: DashScope compatible-mode speaks chat-completions, and the
+  // upstream default (messages) is strictly less compatible; contexts that do
+  // not pin a protocol (tests, SDK embeddings) should follow the fork default.
+  protocol: z.union(['chat-completions', 'messages']).default('chat-completions'),
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
   baseURL: z.string(),
   thinking: z.union(['enabled', 'disabled']),
