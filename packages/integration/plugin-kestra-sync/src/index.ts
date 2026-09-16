@@ -32,7 +32,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export const name = 'kestra-sync'
-export const inject = ['agents', 'sessionController']
+export const inject = ['agents', 'sessionController', 'workspaceRegistry']
 
 export interface Config extends KestraSyncConfig {
   /** 批量队列磁盘持久化路径（默认 ~/.dsh/sync-queue.jsonl） */
@@ -112,10 +112,10 @@ function workspaceRoot(startDir: string): string | undefined {
 function runChild(
   command: string,
   args: string[],
-  options: { env: NodeJS.ProcessEnv; timeoutMs: number },
+  options: { env: NodeJS.ProcessEnv; timeoutMs: number; cwd?: string },
 ): Promise<{ status: number | null; stdout: string; stderr: string; error: Error | undefined }> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { env: options.env })
+    const child = spawn(command, args, { env: options.env, cwd: options.cwd })
     let stdout = ''
     let stderr = ''
     let settled = false
@@ -171,6 +171,12 @@ async function executeRemoteInput(
     getPhase?: (sessionId: string) => string | undefined
     /** 查询手机端 sessionId 对应的 headless 内部 sessionId（用于 --session-id 续会话）。 */
     getHeadlessSessionId?: (sessionId: string) => string | undefined
+    getWorkspace?: (workspaceId: string) => {
+      workspaceId: string
+      title: string
+      path: string
+      attachSession(sessionId: string): Promise<void>
+    } | undefined
   },
   onExecuted?: (info: {
     sessionId: string
@@ -179,6 +185,7 @@ async function executeRemoteInput(
     result?: string
     parentSessionId?: string
     headlessSessionId?: string
+    workspace?: { workspaceId: string; title: string }
   }) => void,
 ): Promise<void> {
   // 选项 B：SSE newSession=true（手机端发起全新会话）——手机端携带 sessionId 时
@@ -196,6 +203,18 @@ async function executeRemoteInput(
   const resumeHeadlessId = target.kind === 'resume'
     ? options.getHeadlessSessionId?.(input.sessionId ?? '')
     : undefined
+  const workspace = input.newSession === true && input.workspaceId
+    ? options.getWorkspace?.(input.workspaceId)
+    : undefined
+  if (input.newSession === true && input.workspaceId && workspace === undefined) {
+    onExecuted?.({
+      sessionId,
+      phase: 'failed',
+      prompt: input.text,
+      result: `工作区不可用：${input.workspaceId}`,
+    })
+    return
+  }
 
   const state: Record<string, unknown> = {
     prompt: input.text,
@@ -258,13 +277,16 @@ async function executeRemoteInput(
     // 执行一次 headless，返回 {exitCode, stdout, stderr}
     const runOnce = async (): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
       if (root !== undefined) {
+        const builtCli = join(root, 'apps', 'cli', 'lib', 'bin.js')
         const result = await runChild(process.execPath,
-          ['--import', 'tsx/esm', join(root, 'apps', 'cli', 'src', 'bin.ts'), ...headlessArgs],
-          { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000 })
+          existsSync(builtCli)
+            ? [builtCli, ...headlessArgs]
+            : ['--import', join(root, 'node_modules', 'tsx', 'dist', 'esm', 'index.mjs'), join(root, 'apps', 'cli', 'src', 'bin.ts'), ...headlessArgs],
+          { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000, ...(workspace === undefined ? {} : { cwd: workspace.path }) })
         return { exitCode: result.status ?? (result.error ? 1 : 0), stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? '') }
       }
       const result = await runChild('dsh', headlessArgs,
-        { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000 })
+        { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000, ...(workspace === undefined ? {} : { cwd: workspace.path }) })
       return { exitCode: result.status ?? 1, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? '') }
     }
 
@@ -314,6 +336,7 @@ async function executeRemoteInput(
     } catch { /* 无结果文件（超时/崩溃）—— 状态照常落地，供手机端可见 */ }
 
     process.stderr.write(`[kestra-sync] remote input executed: session=${sessionId} exit=${exitCode}\n`)
+    if (headlessSessionId && workspace) await workspace.attachSession(headlessSessionId)
     // 选项 B 查询面：headless 派生会话的结果写入本地索引（web 观测不到子进程事件）。
     onExecuted?.({
       sessionId,
@@ -322,6 +345,7 @@ async function executeRemoteInput(
       ...(answer === '' ? {} : { result: answer }),
       ...(target.kind === 'fork' && input.sessionId !== undefined && input.sessionId !== '' ? { parentSessionId: input.sessionId } : {}),
       ...(headlessSessionId ? { headlessSessionId } : {}),
+      ...(workspace === undefined ? {} : { workspace: { workspaceId: workspace.workspaceId, title: workspace.title } }),
     })
     // §3.3 指标事件：会话终态旁路上报（轻量聚合，不含会话全文）
     void client.reportMetric({
@@ -421,9 +445,37 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
     result?: string
     parentSessionId?: string
     headlessSessionId?: string
+    workspace?: { workspaceId: string; title: string }
   }): void => {
     index.record(info)
     if (info.headlessSessionId) headlessSessionMap.set(info.sessionId, info.headlessSessionId)
+  }
+  const workspaceRegistry = (ctx as Context & {
+    workspaceRegistry: {
+      get(id: string): {
+        id: string
+        title: string
+        path: string
+        sessionIds: readonly string[]
+        attachSession(id: string): Promise<void>
+      } | undefined
+      list(): Array<{
+        id: string
+        title: string
+        path: string
+        sessionIds: readonly string[]
+        attachSession(id: string): Promise<void>
+      }>
+    }
+  }).workspaceRegistry
+  const getWorkspace = (workspaceId: string) => {
+    const workspace = workspaceRegistry.get(workspaceId)
+    return workspace === undefined ? undefined : {
+      workspaceId: String(workspace.id),
+      title: workspace.title,
+      path: workspace.path,
+      attachSession: async (sessionId: string) => { await workspace.attachSession(sessionId) },
+    }
   }
 
   const executeOnLiveAgent = async (
@@ -512,6 +564,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
               selection,
               getPhase: sessionId => String(index.get(sessionId)?.phase ?? '') || undefined,
               getHeadlessSessionId: () => persistedHeadlessId,
+              getWorkspace,
             }, recordExecuted)
           })
         }
@@ -527,6 +580,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
             const persisted = (index.get(sessionId) as { state?: { headlessSessionId?: string } } | undefined)?.state?.headlessSessionId
             return typeof persisted === 'string' && persisted ? persisted : undefined
           },
+          getWorkspace,
         }, recordExecuted)
       })
       .catch(() => {})
@@ -536,8 +590,12 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
   // 本地会话索引（选项 B 查询面）：应答中台转发的 session.query（列表/详情）。
   // 会话数据权威在 PC 本地；快照持久化（~/.dsh/kestra-session-index.json）保证
   // PC 重启后 headless 派生会话仍可被手机端查到（web 会话另经恢复通告重建，幂等）。
-  ctx.on('session/created', (session) => { index.upsert(session) })
-  ctx.on('session/event', (session) => { index.upsert(session) })
+  const workspaceForSession = (sessionId: string): { workspaceId: string; title: string } | undefined => {
+    const workspace = workspaceRegistry.list().find(item => item.sessionIds.some(id => String(id) === sessionId))
+    return workspace === undefined ? undefined : { workspaceId: String(workspace.id), title: workspace.title }
+  }
+  ctx.on('session/created', (session) => { index.upsert(session, workspaceForSession(String(session.id))) })
+  ctx.on('session/event', (session) => { index.upsert(session, workspaceForSession(String(session.id))) })
   // 退出兜底：进程正常退出前强制落盘（防抖周期最多丢 2s 内事件，正常退出不丢）。
   process.once('exit', () => index.dispose())
 
@@ -549,6 +607,15 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       return detail === undefined
         ? client.fillQueryResult(query.requestId, query.type, undefined, 'session not found on PC')
         : client.fillQueryResult(query.requestId, query.type, detail)
+    }
+    if (query.type === 'workspace.list') {
+      const workspaces = workspaceRegistry.list().map((workspace, position) => ({
+        workspaceId: String(workspace.id),
+        title: workspace.title,
+        recent: position === 0,
+        sessionCount: workspace.sessionIds.length,
+      }))
+      return client.fillQueryResult(query.requestId, query.type, workspaces)
     }
     return client.fillQueryResult(query.requestId, query.type, index.list())
   }

@@ -89,6 +89,17 @@ describe('SessionIndex 持久化（PC 重启恢复）', () => {
     expect(a.list().map(session => session.sessionId)).toEqual(['phone-2'])
     a.dispose()
   })
+
+  it('记录并保留手机会话的工作区最小投影', () => {
+    const a = new SessionIndex()
+    a.record({
+      sessionId: 'phone-workspace', phase: 'completed', prompt: '首问', result: '首答',
+      workspace: { workspaceId: 'workspace-1', title: '研发平台' },
+    })
+    a.record({ sessionId: 'phone-workspace', phase: 'completed', prompt: '追问', result: '追答' })
+    expect(a.get('phone-workspace')?.workspace).toEqual({ workspaceId: 'workspace-1', title: '研发平台' })
+    a.dispose()
+  })
 })
 
 function dirnameOf(p: string): string {

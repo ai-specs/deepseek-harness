@@ -95,6 +95,8 @@ export interface RemoteInput {
   at?: string
   /** 选项 B：SSE 事件 newSession=true 表示手机端发起全新会话（直接派生新会话）。 */
   newSession?: boolean
+  /** 手机新会话选择的 PC 工作区；追问时忽略，以已有会话归属为准。 */
+  workspaceId?: string
 }
 
 /** §3.3 轻量指标事件（不含会话全文——纯聚合数字，字节级）。 */
@@ -357,6 +359,9 @@ export class KestraSessionSyncClient {
                 sessionId: String(data.sessionId ?? ''),
                 text: String(data.text ?? ''),
                 newSession: data.newSession === true,
+                ...(data.workspaceId === undefined || data.workspaceId === null || String(data.workspaceId) === ''
+                  ? {}
+                  : { workspaceId: String(data.workspaceId) }),
                 at: new Date().toISOString(),
               })
             } else if (type === 'session.approval.decision') {
@@ -682,7 +687,7 @@ export class SessionIndex {
   }
 
   /** 观测入口：会话创建/事件驱动，阶段按事件日志末尾推导。 */
-  upsert(session: MirrorSession): void {
+  upsert(session: MirrorSession, workspace?: { workspaceId: string; title: string }): void {
     if (session.header.parentSession !== undefined) return
     const sessionId = wireSessionId(session.id)
     if (sessionId === undefined) return
@@ -698,6 +703,7 @@ export class SessionIndex {
       createdAt: prev?.createdAt ?? now,
       updatedAt: now,
       summary: String(state.prompt ?? '（无摘要）').slice(0, 90),
+      ...(workspace === undefined ? {} : { workspace }),
       state,
     })
     this.scheduleFlush()
@@ -734,6 +740,7 @@ export class SessionIndex {
     result?: string
     parentSessionId?: string
     headlessSessionId?: string
+    workspace?: { workspaceId: string; title: string }
   }): void {
     const now = new Date().toISOString()
     const prev = this.sessions.get(info.sessionId)
@@ -745,6 +752,7 @@ export class SessionIndex {
       ))
       : []
     const history = [...previousHistory]
+    const workspace = info.workspace ?? prev?.workspace
     if (history.at(-1)?.role !== 'user' || history.at(-1)?.text !== info.prompt) {
       history.push({ role: 'user', text: info.prompt })
     }
@@ -758,6 +766,7 @@ export class SessionIndex {
       createdAt: prev?.createdAt ?? now,
       updatedAt: now,
       summary: prev?.summary ?? String(info.prompt ?? '（无摘要）').slice(0, 90),
+      ...(workspace === undefined ? {} : { workspace }),
       state: {
         source: 'dsh-pc-web',
         ...(prev?.state ?? {}),
@@ -779,5 +788,6 @@ interface IndexedSession {
   createdAt: string
   updatedAt: string
   summary: string
+  workspace?: { workspaceId: string; title: string }
   state: Record<string, unknown>
 }
