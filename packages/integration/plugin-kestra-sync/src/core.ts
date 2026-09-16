@@ -720,7 +720,10 @@ export class SessionIndex {
    * 记录 headless 执行结果（远程指令派生会话的事件在子进程内，web 观测不到，
    * 由 executeRemoteInput 终态回调写入本索引）。同 id 时以最新结果覆盖并保留既有 state。
    */
-  record(info: { sessionId: string; phase: string; prompt: string; result?: string; parentSessionId?: string }): void {
+  record(info: {
+    sessionId: string, phase: string, prompt: string, result?: string
+    parentSessionId?: string, headlessSessionId?: string
+  }): void {
     const now = new Date().toISOString()
     const prev = this.sessions.get(info.sessionId)
     this.sessions.set(info.sessionId, {
@@ -732,10 +735,11 @@ export class SessionIndex {
       summary: String(info.prompt ?? '（无摘要）').slice(0, 90),
       state: {
         source: 'dsh-pc-web',
+        ...(prev?.state ?? {}),
         prompt: info.prompt,
         ...(info.result === undefined ? {} : { result: info.result }),
         ...(info.parentSessionId === undefined ? {} : { parentSessionId: info.parentSessionId }),
-        ...(prev?.state ?? {}),
+        ...(info.headlessSessionId === undefined ? {} : { headlessSessionId: info.headlessSessionId }),
       },
     })
     this.scheduleFlush()

@@ -5,7 +5,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
@@ -17,7 +17,6 @@ import type {} from '@deepseek-ai/dsh-session'
 import {
   KestraSessionSyncClient,
   SessionIndex,
-  decideInputTarget,
   type KestraSyncConfig,
   type RemoteInput,
   type SessionSnapshot,
@@ -169,25 +168,29 @@ async function executeRemoteInput(
     timeoutSeconds: number
     selection?: (() => { provider: string; model: string } | undefined) | undefined
     getPhase?: (sessionId: string) => string | undefined
+    /** 查询手机端 sessionId 对应的 headless 内部 sessionId（用于 --session-id 续会话）。 */
+    getHeadlessSessionId?: (sessionId: string) => string | undefined
   },
-  onExecuted?: (info: { sessionId: string; phase: string; prompt: string; result?: string; parentSessionId?: string }) => void,
+  onExecuted?: (info: {
+    sessionId: string, phase: string, prompt: string, result?: string
+    parentSessionId?: string, headlessSessionId?: string
+  }) => void,
 ): Promise<void> {
-  // 选项 B：父会话 phase 从 PC 本地会话索引读取（会话数据权威在 PC，中台无会话存储；
-  // 索引未命中（如会话不在本端）→ 按 RUNNING 处理，由服务端/对端语义兜底）。
-  const parentPhase = options.getPhase?.(input.sessionId ?? '')
   // 选项 B：SSE newSession=true（手机端发起全新会话）——手机端携带 sessionId 时
   // 直接采纳（方案 C 2026-09-15：新会话 id 由手机端生成、PC 接受——发送即关联，
   // 手机端无需靠列表匹配回学 id）；未携带（兼容旧端/未发送队列老数据）回退 PC
-  // 派生新 id。追问（newSession=false）沿用 decideInputTarget（终态派生、进行中原地）。
+  // 派生新 id。追问（newSession=false）一律 resume 原手机端 sessionId，不 fork——
+  // 通过 --session-id 把消息追加到 headless 内部会话，AI 能看到历史上下文。
   const target = input.newSession === true
     ? (input.sessionId
       ? { kind: 'resume' as const, sessionId: input.sessionId }
       : { kind: 'fork' as const, sessionId: input.sessionId, newSessionId: randomUUID() })
-    : decideInputTarget({
-      sessionId: input.sessionId,
-      phase: parentPhase ?? 'RUNNING',
-    })
+    : { kind: 'resume' as const, sessionId: input.sessionId }
   const sessionId = target.kind === 'fork' ? target.newSessionId : input.sessionId
+  // resume 已有会话时，查 headless 内部 sessionId，传给 --session-id 让模型续上下文。
+  const resumeHeadlessId = target.kind === 'resume'
+    ? options.getHeadlessSessionId?.(input.sessionId ?? '')
+    : undefined
 
   const state: Record<string, unknown> = {
     prompt: input.text,
@@ -237,25 +240,66 @@ async function executeRemoteInput(
   }
 
   const startedAt = Date.now()
+  let headlessSessionId: string | undefined
   try {
     const root = workspaceRoot(fileURLToPath(new URL('..', import.meta.url)))
-    let exitCode: number
-    if (root !== undefined) {
-      const result = await runChild(process.execPath,
-        ['--import', 'tsx/esm', join(root, 'apps', 'cli', 'src', 'bin.ts'),
-          '--profile', 'headless', '--patch', overlayPath, input.text],
-        { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000 })
-      exitCode = result.status ?? (result.error ? 1 : 0)
-      if (result.status !== 0) {
-        // 子进程失败要留痕：错误输出进插件日志，手机端也能看到 FAILED 会话
-        process.stderr.write(`[kestra-sync] remote input run exit=${result.status}: `
-          + `${(result.stderr ?? '').slice(-600)}${(result.stdout ?? '').slice(-200)}\n`)
+    const headlessArgs = [
+      '--profile', 'headless',
+      '--patch', overlayPath,
+      '--json',
+      ...(resumeHeadlessId ? ['--session-id', resumeHeadlessId] : []),
+      input.text,
+    ]
+    // 执行一次 headless，返回 {exitCode, stdout, stderr}
+    const runOnce = async (): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
+      if (root !== undefined) {
+        const result = await runChild(process.execPath,
+          ['--import', 'tsx/esm', join(root, 'apps', 'cli', 'src', 'bin.ts'), ...headlessArgs],
+          { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000 })
+        return { exitCode: result.status ?? (result.error ? 1 : 0), stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? '') }
       }
-      if (result.error) process.stderr.write(`[kestra-sync] remote input run error: ${String(result.error)}\n`)
-    } else {
-      const result = await runChild('dsh', ['--profile', 'headless', '--patch', overlayPath, input.text],
+      const result = await runChild('dsh', headlessArgs,
         { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000 })
-      exitCode = result.status ?? 1
+      return { exitCode: result.status ?? 1, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? '') }
+    }
+
+    let run = await runOnce()
+    // session 写句柄未释放时（进程已退出但锁文件残留），删锁后重试
+    if (run.exitCode !== 0 && (run.stderr + run.stdout).includes('already owned')) {
+      process.stderr.write('[kestra-sync] session lock busy, clearing lock and retrying...\n')
+      if (resumeHeadlessId) {
+        try {
+          const sessionsRoot = join(homedir(), '.dsh', 'sessions')
+          for (const sub of readdirSync(sessionsRoot)) {
+            const lockPath = join(sessionsRoot, sub, resumeHeadlessId, 'session.lock')
+            try {
+              unlinkSync(lockPath)
+              process.stderr.write(`[kestra-sync] removed stale lock: ${lockPath}\n`)
+            } catch { /* 锁文件不存在则忽略 */ }
+          }
+        } catch (e) {
+          process.stderr.write(`[kestra-sync] failed to clear lock: ${String(e)}\n`)
+        }
+      }
+      await new Promise(r => setTimeout(r, 1000))
+      run = await runOnce()
+    }
+    const exitCode = run.exitCode
+    const stdout = run.stdout
+    const stderr = run.stderr
+    process.stderr.write(`[kestra-sync] DIAG stdout head: ${stdout.slice(0, 200).replace(/\n/g, '\\n')}\n`)
+    const firstLine = stdout.split('\n').find(l => l.trim().startsWith('{'))
+    if (firstLine) {
+      try {
+        const evt = JSON.parse(firstLine)
+        if (evt && evt.type === 'session' && typeof evt.sessionId === 'string') {
+          headlessSessionId = evt.sessionId
+        }
+      } catch { /* 忽略解析错误 */ }
+    }
+    if (exitCode !== 0) {
+      process.stderr.write(`[kestra-sync] remote input run exit=${exitCode}: `
+        + `${stderr.slice(-600)}${stdout.slice(-200)}\n`)
     }
 
     let answer = ''
@@ -272,6 +316,7 @@ async function executeRemoteInput(
       prompt: input.text,
       ...(answer === '' ? {} : { result: answer }),
       ...(target.kind === 'fork' && input.sessionId !== undefined && input.sessionId !== '' ? { parentSessionId: input.sessionId } : {}),
+      ...(headlessSessionId ? { headlessSessionId } : {}),
     })
     // §3.3 指标事件：会话终态旁路上报（轻量聚合，不含会话全文）
     void client.reportMetric({
@@ -361,6 +406,8 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
   // headless 子进程），但二选一运行——SSE 开启（默认）时不再轮询，避免双通道
   // 重复执行；useSse=false 时回退轮询（S1 双通道去重：汇聚同一 executeRemoteInput）。
   const chain: { p: Promise<void> } = { p: Promise.resolve() }
+  // 手机端 sessionId → headless 内部 sessionId 映射（追问时传 --session-id 续会话）。
+  const headlessSessionMap = new Map<string, string>()
   const handleRemoteInput = (input: RemoteInput): Promise<void> => {
     process.stderr.write(`[kestra-sync] DIAG input=${JSON.stringify(input)}\n`)
     chain.p = chain.p
@@ -371,9 +418,20 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
           selection,
           // 追问的父会话 phase 从本地索引读取（会话数据权威在 PC）。
           getPhase: sessionId => String(index.get(sessionId)?.phase ?? '') || undefined,
+          // 查手机端 sessionId 对应的 headless 内部 sessionId（内存优先，回落持久化索引）。
+          getHeadlessSessionId: (sessionId) => {
+            const mem = headlessSessionMap.get(sessionId)
+            if (mem) return mem
+            const persisted = (index.get(sessionId) as { state?: { headlessSessionId?: string } } | undefined)?.state?.headlessSessionId
+            return typeof persisted === 'string' && persisted ? persisted : undefined
+          },
         }, (info) => {
           // headless 派生会话写入本地索引（选项 B 查询面）。
           index.record(info)
+          // 记录手机端 sessionId → headless sessionId 映射，供后续追问续会话。
+          if (info.headlessSessionId) {
+            headlessSessionMap.set(info.sessionId, info.headlessSessionId)
+          }
         })
       })
       .catch(() => {})
