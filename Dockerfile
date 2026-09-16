@@ -23,7 +23,7 @@ ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmjs.org --fetch-timeout=300000 --fetch-retries=5
+RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmmirror.com --fetch-timeout=300000 --fetch-retries=5
 WORKDIR /app
 
 # 工作区安装需要全部 importer 目录在场（packages/*/*、apps/* 等都是 workspace
@@ -102,9 +102,10 @@ RUN node --input-type=module -e "\
 
 # ── runtime：构建产物 + 启动入口 ─────────────────────────────────────────────
 FROM node:24-slim
-ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org \
+# NPM_CONFIG_REGISTRY 仅影响 npm/npx；pnpm 读 .npmrc（npmmirror 主源，2026-09-16 网络实测）
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     DSH_HOME=/root/.dsh
-RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmjs.org --fetch-timeout=300000 --fetch-retries=5
+RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmmirror.com --fetch-timeout=300000 --fetch-retries=5
 WORKDIR /app
 COPY --from=builder /app /app
 ENV PATH="/app/node_modules/.bin:${PATH}"

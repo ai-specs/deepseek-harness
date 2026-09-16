@@ -40,6 +40,7 @@ export const en = {
   'user.loading': 'Loading identity…',
   'user.signedOut': 'Not signed in',
   'connection.error': 'Disconnected',
+  'connection.retry': 'Reconnect now',
   'connection.connecting': 'Reconnecting',
   'connection.connected': 'Connected',
   'connection.reconnect': 'Disconnected, reconnect now',
