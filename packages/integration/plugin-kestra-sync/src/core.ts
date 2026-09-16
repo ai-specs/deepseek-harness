@@ -705,7 +705,14 @@ export class SessionIndex {
 
   /** 会话列表（按 updatedAt 倒序），供 session.list 应答。 */
   list(): Array<Record<string, unknown>> {
+    const aliasedHeadlessIds = new Set(
+      [...this.sessions.values()]
+        .map(session => session.state?.headlessSessionId)
+        .filter((id): id is string => typeof id === 'string' && id !== '')
+        .map(id => wireSessionId(id) ?? id),
+    )
     return [...this.sessions.values()]
+      .filter(session => !aliasedHeadlessIds.has(session.sessionId))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map(s => ({ ...s }))
   }
@@ -721,21 +728,40 @@ export class SessionIndex {
    * 由 executeRemoteInput 终态回调写入本索引）。同 id 时以最新结果覆盖并保留既有 state。
    */
   record(info: {
-    sessionId: string, phase: string, prompt: string, result?: string
-    parentSessionId?: string, headlessSessionId?: string
+    sessionId: string
+    phase: string
+    prompt: string
+    result?: string
+    parentSessionId?: string
+    headlessSessionId?: string
   }): void {
     const now = new Date().toISOString()
     const prev = this.sessions.get(info.sessionId)
+    const previousHistory = Array.isArray(prev?.state?.history)
+      ? prev.state.history.filter((item): item is { role: 'user' | 'assistant'; text: string } => (
+        typeof item === 'object' && item !== null
+          && ((item as { role?: unknown }).role === 'user' || (item as { role?: unknown }).role === 'assistant')
+          && typeof (item as { text?: unknown }).text === 'string'
+      ))
+      : []
+    const history = [...previousHistory]
+    if (history.at(-1)?.role !== 'user' || history.at(-1)?.text !== info.prompt) {
+      history.push({ role: 'user', text: info.prompt })
+    }
+    if (info.result !== undefined && (history.at(-1)?.role !== 'assistant' || history.at(-1)?.text !== info.result)) {
+      history.push({ role: 'assistant', text: info.result })
+    }
     this.sessions.set(info.sessionId, {
       sessionId: info.sessionId,
       phase: info.phase,
       pendingInput: false,
       createdAt: prev?.createdAt ?? now,
       updatedAt: now,
-      summary: String(info.prompt ?? '（无摘要）').slice(0, 90),
+      summary: prev?.summary ?? String(info.prompt ?? '（无摘要）').slice(0, 90),
       state: {
         source: 'dsh-pc-web',
         ...(prev?.state ?? {}),
+        history,
         prompt: info.prompt,
         ...(info.result === undefined ? {} : { result: info.result }),
         ...(info.parentSessionId === undefined ? {} : { parentSessionId: info.parentSessionId }),

@@ -17,6 +17,7 @@ import type {} from '@deepseek-ai/dsh-session'
 import {
   KestraSessionSyncClient,
   SessionIndex,
+  foldSyncState,
   type KestraSyncConfig,
   type RemoteInput,
   type SessionSnapshot,
@@ -31,7 +32,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export const name = 'kestra-sync'
-export const inject: string[] = []
+export const inject = ['agents', 'sessionController']
 
 export interface Config extends KestraSyncConfig {
   /** 批量队列磁盘持久化路径（默认 ~/.dsh/sync-queue.jsonl） */
@@ -172,8 +173,12 @@ async function executeRemoteInput(
     getHeadlessSessionId?: (sessionId: string) => string | undefined
   },
   onExecuted?: (info: {
-    sessionId: string, phase: string, prompt: string, result?: string
-    parentSessionId?: string, headlessSessionId?: string
+    sessionId: string
+    phase: string
+    prompt: string
+    result?: string
+    parentSessionId?: string
+    headlessSessionId?: string
   }) => void,
 ): Promise<void> {
   // 选项 B：SSE newSession=true（手机端发起全新会话）——手机端携带 sessionId 时
@@ -406,13 +411,110 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
   // headless 子进程），但二选一运行——SSE 开启（默认）时不再轮询，避免双通道
   // 重复执行；useSse=false 时回退轮询（S1 双通道去重：汇聚同一 executeRemoteInput）。
   const chain: { p: Promise<void> } = { p: Promise.resolve() }
+  const index = new SessionIndex(config.sessionIndexPath ?? join(homedir(), '.dsh', 'kestra-session-index.json'))
   // 手机端 sessionId → headless 内部 sessionId 映射（追问时传 --session-id 续会话）。
   const headlessSessionMap = new Map<string, string>()
+  const recordExecuted = (info: {
+    sessionId: string
+    phase: string
+    prompt: string
+    result?: string
+    parentSessionId?: string
+    headlessSessionId?: string
+  }): void => {
+    index.record(info)
+    if (info.headlessSessionId) headlessSessionMap.set(info.sessionId, info.headlessSessionId)
+  }
+
+  const executeOnLiveAgent = async (
+    input: RemoteInput,
+    headlessSessionId: string,
+  ): Promise<boolean> => {
+    interface LiveAgent {
+      whenIdle(): Promise<void>
+      session: {
+        deriveMessages(): ReadonlyArray<{ role: string; content: unknown }>
+      }
+    }
+    const host = ctx as Context & {
+      agents?: { get(id: string): LiveAgent | undefined }
+      sessionController?: {
+        prompt(request: {
+          requestId: string
+          sessionId: string
+          mode: 'queue'
+          content: Array<{ type: 'text'; text: string }>
+        }, signal: AbortSignal): Promise<{ accepted: true }>
+      }
+    }
+    if (host.agents === undefined || host.sessionController === undefined) return false
+
+    const startedAt = Date.now()
+    process.stderr.write(`[kestra-sync] remote input using live PC agent: session=${input.sessionId} headless=${headlessSessionId}\n`)
+    try {
+      await host.sessionController.prompt({
+        requestId: randomUUID(),
+        sessionId: headlessSessionId,
+        mode: 'queue',
+        content: [{ type: 'text', text: input.text }],
+      }, new AbortController().signal)
+      const agent = host.agents.get(headlessSessionId)
+      if (agent === undefined) throw new Error('SessionController accepted input without publishing the live Agent')
+      await agent.whenIdle()
+      const result = foldSyncState(agent.session.deriveMessages()).result ?? ''
+      index.record({
+        sessionId: input.sessionId ?? headlessSessionId,
+        phase: 'completed',
+        prompt: input.text,
+        ...(result === '' ? {} : { result }),
+        headlessSessionId,
+      })
+      void client.reportMetric({
+        type: 'session_end',
+        sessionId: input.sessionId ?? headlessSessionId,
+        outcome: 'completed',
+        durationMs: Date.now() - startedAt,
+      })
+      return true
+    } catch (e) {
+      process.stderr.write(`[kestra-sync] live PC agent input failed: session=${input.sessionId} error=${String(e)}\n`)
+      index.record({
+        sessionId: input.sessionId ?? headlessSessionId,
+        phase: 'failed',
+        prompt: input.text,
+        result: `执行失败：${String(e).slice(0, 200)}`,
+        headlessSessionId,
+      })
+      void client.reportMetric({
+        type: 'session_end',
+        sessionId: input.sessionId ?? headlessSessionId,
+        outcome: 'failed',
+        durationMs: Date.now() - startedAt,
+      })
+      return true
+    }
+  }
+
   const handleRemoteInput = (input: RemoteInput): Promise<void> => {
     process.stderr.write(`[kestra-sync] DIAG input=${JSON.stringify(input)}\n`)
     chain.p = chain.p
       .then(() => {
         applyEnvOverrideOnce()
+        const persistedHeadlessId = input.sessionId === undefined ? undefined : (
+          headlessSessionMap.get(input.sessionId)
+          ?? (index.get(input.sessionId) as { state?: { headlessSessionId?: string } } | undefined)?.state?.headlessSessionId
+        )
+        if (input.newSession !== true && persistedHeadlessId) {
+          return executeOnLiveAgent(input, persistedHeadlessId).then((handled) => {
+            if (handled) return
+            return executeRemoteInput(client, input, {
+              timeoutSeconds: config.remoteInputTimeoutSeconds ?? 300,
+              selection,
+              getPhase: sessionId => String(index.get(sessionId)?.phase ?? '') || undefined,
+              getHeadlessSessionId: () => persistedHeadlessId,
+            }, recordExecuted)
+          })
+        }
         return executeRemoteInput(client, input, {
           timeoutSeconds: config.remoteInputTimeoutSeconds ?? 300,
           selection,
@@ -425,14 +527,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
             const persisted = (index.get(sessionId) as { state?: { headlessSessionId?: string } } | undefined)?.state?.headlessSessionId
             return typeof persisted === 'string' && persisted ? persisted : undefined
           },
-        }, (info) => {
-          // headless 派生会话写入本地索引（选项 B 查询面）。
-          index.record(info)
-          // 记录手机端 sessionId → headless sessionId 映射，供后续追问续会话。
-          if (info.headlessSessionId) {
-            headlessSessionMap.set(info.sessionId, info.headlessSessionId)
-          }
-        })
+        }, recordExecuted)
       })
       .catch(() => {})
     return chain.p
@@ -441,7 +536,6 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
   // 本地会话索引（选项 B 查询面）：应答中台转发的 session.query（列表/详情）。
   // 会话数据权威在 PC 本地；快照持久化（~/.dsh/kestra-session-index.json）保证
   // PC 重启后 headless 派生会话仍可被手机端查到（web 会话另经恢复通告重建，幂等）。
-  const index = new SessionIndex(config.sessionIndexPath ?? join(homedir(), '.dsh', 'kestra-session-index.json'))
   ctx.on('session/created', (session) => { index.upsert(session) })
   ctx.on('session/event', (session) => { index.upsert(session) })
   // 退出兜底：进程正常退出前强制落盘（防抖周期最多丢 2s 内事件，正常退出不丢）。

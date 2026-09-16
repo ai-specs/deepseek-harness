@@ -62,6 +62,33 @@ describe('SessionIndex 持久化（PC 重启恢复）', () => {
     expect(a.get('mem-1')).toBeDefined()
     a.dispose()
   })
+
+  it('外部会话映射到 headless 会话后，列表只暴露外部会话且追问保留首问标题', () => {
+    const a = new SessionIndex()
+    a.record({ sessionId: 'phone-1', phase: 'completed', prompt: '首问', result: '首答', headlessSessionId: 'headless-1' })
+    a.record({ sessionId: 'headless-1', phase: 'completed', prompt: '首问', result: '首答' })
+    a.record({ sessionId: 'phone-1', phase: 'completed', prompt: '追问', result: '追答', headlessSessionId: 'headless-1' })
+
+    expect(a.list().map(session => session.sessionId)).toEqual(['phone-1'])
+    expect(a.get('phone-1')?.summary).toBe('首问')
+    expect((a.get('phone-1')?.state as Record<string, unknown>).prompt).toBe('追问')
+    expect((a.get('phone-1')?.state as Record<string, unknown>).history).toEqual([
+      { role: 'user', text: '首问' },
+      { role: 'assistant', text: '首答' },
+      { role: 'user', text: '追问' },
+      { role: 'assistant', text: '追答' },
+    ])
+    a.dispose()
+  })
+
+  it('列表隐藏带 session- 前缀的内部 headless 会话', () => {
+    const a = new SessionIndex()
+    const internal = 'session-64ecd3fd-146e-42bf-80c7-27f1f291082a'
+    a.record({ sessionId: 'phone-2', phase: 'completed', prompt: '首问', result: '首答', headlessSessionId: internal })
+    a.record({ sessionId: '64ecd3fd-146e-42bf-80c7-27f1f291082a', phase: 'completed', prompt: '首问', result: '首答' })
+    expect(a.list().map(session => session.sessionId)).toEqual(['phone-2'])
+    a.dispose()
+  })
 })
 
 function dirnameOf(p: string): string {
