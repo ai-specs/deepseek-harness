@@ -1,5 +1,10 @@
 # dsh(PC) 运行时镜像 —— 双入口多阶段构建
 #
+# 角色定位：全量编译形态（容器内 pnpm install + tsc -b/tsdown 编译），dev 与 CI/PR
+# 共用同一份 Dockerfile，无需宿主预编译。产物新鲜由容器内编译保证（原生依赖在
+# 构建时按平台拉预编译包/编译，宿主 macOS 产物进不了 Linux 容器），镜像新鲜由
+# compose 的 pull_policy: build 保证。
+#
 #   builder：完整工作区安装 + host-face lib 构建（tsc -b + tsdown）
 #   runtime ：复制构建产物，默认 headless 一次性入口（Kestra AIAgent 容器契约）
 #
