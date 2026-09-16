@@ -307,22 +307,141 @@ class MockModelHandler(BaseHTTPRequestHandler):
     requests: list[dict[str, object]] = []
 
     def do_POST(self) -> None:
-        if self.path != "/v1/messages":
-            self.send_error(404)
-            return
         content_length = int(self.headers.get("content-length", "0"))
         body = json.loads(self.rfile.read(content_length))
         self.requests.append(body)
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.end_headers()
-        chunks = completion_chunks(body)
-        for chunk in chunks:
-            self.wfile.write(f"event: {chunk['type']}\ndata: {json.dumps(chunk)}\n\n".encode())
+        if self.path == "/chat/completions":
+            # dsh fork：运行时 llm-deepseek 钉死 protocol: chat-completions
+            # （packages/bundle/base/cordis.patch.yml，DashScope compatible-mode，
+            # 见 .env DEEPSEEK_BASE_URL）。将 OpenAI 风格请求归一化为 Messages
+            # 形态复用场景引擎，再把 Messages 响应块翻译回 OpenAI SSE。
+            chunks = completion_chunks(chat_completions_to_messages(body))
+            for chunk in chunks:
+                translated = messages_chunk_to_chat_completions(chunk)
+                if translated is not None:
+                    self.wfile.write(f"data: {json.dumps(translated)}\n\n".encode())
+            self.wfile.write(b"data: [DONE]\n\n")
+        elif self.path == "/v1/messages":
+            chunks = completion_chunks(body)
+            for chunk in chunks:
+                self.wfile.write(f"event: {chunk['type']}\ndata: {json.dumps(chunk)}\n\n".encode())
+        else:
+            self.send_error(404)
+            return
         self.wfile.flush()
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
+
+
+def chat_completions_to_messages(body: dict[str, object]) -> dict[str, object]:
+    """Normalize an OpenAI-style chat-completions request to the Messages shape the scenario engine reads.
+
+    The runtime (llm-deepseek, protocol: chat-completions) sends:
+    - ``content`` as a plain string or OpenAI content blocks;
+    - assistant tool calls as ``tool_calls[{id, function:{name, arguments}}]``;
+    - tool results as ``{role: tool, tool_call_id, content}``;
+    - ``tools`` as ``[{type: function, function: {name, description, parameters}}]``.
+    The scenario engine (completion_chunks / assert_advertised_tool) expects
+    Messages blocks (text/tool_use/tool_result) and ``tools[{name, ...}]``.
+    """
+    messages: list[dict[str, object]] = []
+    for message in body.get("messages", []):
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role", "")
+        content = message.get("content")
+        blocks: list[dict[str, object]] = []
+        if isinstance(content, str):
+            if content:
+                blocks.append({"type": "text", "text": content})
+        elif isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") in ("text", "input_text", "output_text"):
+                    text = block.get("text", "")
+                    if isinstance(text, str) and text:
+                        blocks.append({"type": "text", "text": text})
+        if role == "assistant":
+            tool_calls = message.get("tool_calls")
+            if isinstance(tool_calls, list):
+                for tc in tool_calls:
+                    if not isinstance(tc, dict):
+                        continue
+                    fn = tc.get("function")
+                    name = fn.get("name", "") if isinstance(fn, dict) else ""
+                    raw_arguments = fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
+                    try:
+                        arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+                    except json.JSONDecodeError:
+                        arguments = {}
+                    blocks.append({"type": "tool_use", "id": tc.get("id", ""), "name": name, "input": arguments})
+        if role == "tool" and isinstance(message.get("tool_call_id"), str):
+            result_text = content if isinstance(content, str) else ""
+            blocks.append({
+                "type": "tool_result",
+                "tool_use_id": message["tool_call_id"],
+                "content": [{"type": "text", "text": result_text}],
+            })
+        if role or blocks:
+            messages.append({"role": role, "content": blocks})
+    tools = body.get("tools")
+    normalized_tools: list[dict[str, object]] = []
+    if isinstance(tools, list):
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            fn = tool.get("function")
+            if isinstance(fn, dict):
+                normalized_tools.append({
+                    "name": fn.get("name", ""),
+                    "description": fn.get("description", ""),
+                    "input_schema": fn.get("parameters", {}),
+                })
+            elif isinstance(tool.get("name"), str):
+                normalized_tools.append(tool)
+    return {"model": body.get("model"), "messages": messages, "tools": normalized_tools}
+
+
+def messages_chunk_to_chat_completions(chunk: dict[str, object]) -> dict[str, object] | None:
+    """Translate one Messages-protocol chunk to an OpenAI-style chat-completions SSE payload.
+
+    ``message_start`` / ``content_block_stop`` / ``message_stop`` carry no wire
+    equivalent and are dropped; the caller appends the literal ``[DONE]`` sentinel.
+    """
+    chunk_type = chunk.get("type")
+    if chunk_type == "content_block_start":
+        block = chunk.get("content_block", {})
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            return {"choices": [{"index": 0, "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": block.get("id", ""),
+                    "function": {"name": block.get("name", ""), "arguments": ""},
+                }],
+            }}]}
+        return None
+    if chunk_type == "content_block_delta":
+        delta = chunk.get("delta", {})
+        if not isinstance(delta, dict):
+            return None
+        if delta.get("type") == "text_delta":
+            return {"choices": [{"index": 0, "delta": {"content": delta.get("text", "")}}]}
+        if delta.get("type") == "input_json_delta":
+            return {"choices": [{"index": 0, "delta": {
+                "tool_calls": [{"index": 0, "function": {"arguments": delta.get("partial_json", "")}}],
+            }}]}
+        return None
+    if chunk_type == "message_delta":
+        delta = chunk.get("delta", {})
+        stop_reason = delta.get("stop_reason") if isinstance(delta, dict) else None
+        reason = {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(stop_reason, "stop")
+        return {"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]}
+    return None
 
 
 def completion_chunks(body: dict[str, object]) -> list[dict[str, object]]:
