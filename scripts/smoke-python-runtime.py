@@ -2027,17 +2027,31 @@ def build_in_history_snapshot_files(
     request_prompts = []
     for index, request in enumerate(requests):
         messages = request["messages"]
-        assert message_text(request.get("system")) == prompts[0]
+        # chat-completions folds the system prompt into messages[0]; the
+        # Messages protocol carries it in the top-level system field.
+        request_system = message_text(request.get("system"))
+        system_in_messages = False
+        if not request_system and messages and isinstance(messages[0], dict)                 and messages[0].get("role") == "system":
+            request_system = message_text(messages[0].get("content"))
+            system_in_messages = True
+        assert request_system == prompts[0]
         assert request["tools"] == requests[0]["tools"], "prompt update changed tool schemas"
-        positions = [position for position, message in enumerate(messages) if message["role"] == "system"]
-        texts = [message_text(request["system"]), *[
+        positions = [
+            position for position, message in enumerate(messages)
+            if message["role"] == "system" and not (system_in_messages and position == 0)
+        ]
+        texts = [request_system, *[
             message_text(messages[position]["content"]) for position in positions
         ]]
         assert texts == (prompts[:1] if index == 0 else prompts), texts
         if index > 0:
             previous = messages[positions[0] - 1]
-            assert previous["role"] == "user" and any(
-                block.get("type") == "tool_result" for block in previous["content"]
+            assert previous["role"] in ("user", "tool") and (
+                previous["role"] == "tool"
+                or any(
+                    isinstance(block, dict) and block.get("type") == "tool_result"
+                    for block in previous["content"]
+                )
             ), messages
         request_prompts.append(texts)
     evidence = {
