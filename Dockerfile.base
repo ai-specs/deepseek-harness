@@ -19,11 +19,11 @@ FROM node:24-slim
 # 使下方 apt 层缓存失效（apt 源在当前网络下不稳，重跑易失败）。
 ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 # 原生依赖编译链：fs-ext（上游 session write-lease）等需要 node-gyp（python3/make/g++）。
-# 源先切 aliyun 国内镜像：deb.debian.org 在本机网络下 502/连接失败（历史教训），
-# 镜像可达性实测 200。
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
-    apt-get update \
- && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
+# 源切 huaweicloud 国内镜像（容器内实测：deb.debian.org 502、aliyun/tuna 超时/403，
+# 仅 huaweicloud 200 且 11.9MB 完整返回）；加 apt 显式重试应对瞬时抖动。
+RUN sed -i 's|deb.debian.org|repo.huaweicloud.com|g; s|security.debian.org|repo.huaweicloud.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || sed -i 's|deb.debian.org|repo.huaweicloud.com|g; s|security.debian.org|repo.huaweicloud.com|g' /etc/apt/sources.list; \
+    apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=120 update \
+ && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=120 install -y --no-install-recommends python3 make g++ ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmmirror.com --fetch-timeout=300000 --fetch-retries=5
 WORKDIR /app
