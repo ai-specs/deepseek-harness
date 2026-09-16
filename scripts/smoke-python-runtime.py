@@ -1107,7 +1107,11 @@ def assert_live_turn(label: str, result: RunResult) -> None:
             f"{label} turn made no model-requested tool call; "
             f"final={result.final_response!r}"
         )
-    if result.final_response.strip() != LIVE_API_SENTINEL:
+    # Real providers are non-deterministic: the model may wrap the sentinel in
+    # extra prose even when the prompt asked for exactly the sentinel. Functional
+    # correctness (file bytes, tool calls) is asserted separately; here we only
+    # require the sentinel to appear, not to be the entire reply.
+    if LIVE_API_SENTINEL not in result.final_response:
         raise AssertionError(f"{label} turn returned {result.final_response!r}")
 
 def safe_turn_end(value: object) -> object:
