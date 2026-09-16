@@ -1,0 +1,24 @@
+# 依赖与构建产物：本机 node_modules 高达 1.6G+，绝不进构建上下文/镜像
+node_modules
+**/node_modules
+.gradle
+build
+**/build
+.dsh
+.dsh-build
+*.tsbuildinfo
+
+# 版本控制与本地文件
+.git
+.gitmodules
+.agents
+.claude
+.cursor
+.github
+.DS_Store
+*.log
+
+# 文档/基准（镜像不需要）
+benchmarks
+docs
+*.md

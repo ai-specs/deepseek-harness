@@ -1,119 +1,37 @@
-# dsh(PC) 运行时镜像 —— 双入口多阶段构建
+# dsh(PC) 运行时镜像 —— dev 增量形态（基于 dsh-base:dev）
 #
-# 角色定位：全量编译形态（容器内 pnpm install + tsc -b/tsdown 编译），dev 与 CI/PR
-# 共用同一份 Dockerfile，无需宿主预编译。产物新鲜由容器内编译保证（原生依赖在
-# 构建时按平台拉预编译包/编译，宿主 macOS 产物进不了 Linux 容器），镜像新鲜由
-# compose 的 pull_policy: build 保证。
-#
-#   builder：完整工作区安装 + host-face lib 构建（tsc -b + tsdown）
-#   runtime ：复制构建产物，默认 headless 一次性入口（Kestra AIAgent 容器契约）
+# 角色定位：源码覆盖形态。Dockerfile.base 烘焙「环境 + 全量依赖 + 原生预编译 +
+# 契约门」（tag dsh-base:dev，依赖变更时 bun run build:dsh:base 重建）；本文件
+# 只做增量三件事：
+#   1) FROM dsh-base:dev（依赖已就绪；平台差异已在 base 内按 Linux 容器解决，
+#      宿主 macOS 不参与编译，产物可进容器）；
+#   2) COPY 最新源码覆盖 /app 对应路径（路径集合与 Dockerfile.base 一致，
+#      node_modules 保留 base 版本）；
+#   3) 补运行时配置（PATH / DSH_HOME / VOLUME / EXPOSE / CMD）。
+# 因此：源码变更 = 秒级增量构建；pnpm-lock.yaml / patches / native 平台包清单
+# 变更 = 先重建 base（bun run build:dsh:base）。
+# 镜像新鲜由 compose pull_policy: build 保证。
 #
 # 两种用法：
 #   headless（默认，Kestra AIAgent 驱动）：
 #     docker run --rm -e DSH_PROMPT="…" -e DEEPSEEK_API_KEY=… ghcr.io/ai-specs/dsh
 #   web 常驻（开发模式）：
 #     docker run -p 3000:3000 ghcr.io/ai-specs/dsh pnpm dsh web --port 3000
-#
-# 说明：runtime 保留完整 node_modules —— dsh 启动器是 workspace 源码模式
-# （`pnpm dsh` = node --import tsx/esm apps/cli/src/bin.ts），插件加载器按包名
-# 从工作区 node_modules 解析 Cordis 插件，因此 dev 依赖无法安全剪除。
+FROM dsh-base:dev
 
-# ── builder：安装 + 构建 ─────────────────────────────────────────────────────
-FROM node:24-slim AS builder
-# pnpm 11+ 只读 .npmrc（registry 由 .npmrc 决定= npmjs 优先，见文件头注释）；
-# 此 ENV 仅影响 npm/npx（npm pack 拉 native 预编译包）。保持与历史一致以免
-# 使下方 apt 层缓存失效（apt 源在当前网络下不稳，重跑易失败）。
-ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
-# 原生依赖编译链：fs-ext（上游 session write-lease）等需要 node-gyp（python3/make/g++）
-RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
- && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmmirror.com --fetch-timeout=300000 --fetch-retries=5
 WORKDIR /app
-
-# 工作区安装需要全部 importer 目录在场（packages/*/*、apps/* 等都是 workspace
-# 成员），因此源码先于 pnpm install 拷贝；换锁文件外的源码会重新安装，
-# 这是正确性与缓存粒度的折中。
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc* ./
-# patchedDependencies 由 pnpm-workspace.yaml 引用，缺 patches/ 会让 install 直接 254
 COPY patches patches
 COPY vendor vendor
 COPY native native
 COPY packages packages
 COPY apps apps
-# registry 走 pnpm 默认（npmjs，完整但慢），显式加大超时与重试；
-# npmmirror 作为回退（快，但个别平台 tarball 重定向会超时）。
-# store 走 BuildKit 缓存挂载：COPY 层变化时不重下依赖。
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    (CI=true pnpm install --no-frozen-lockfile --ignore-scripts \
-      --registry=https://registry.npmjs.org \
-      --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-maxtimeout=120000 \
-  || CI=true pnpm install --no-frozen-lockfile --ignore-scripts \
-      --registry=https://registry.npmjs.org \
-      --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-maxtimeout=120000)
-# 以下是纯编译输入（非 workspace 成员）：变更只影响缓存到这一层为止
-COPY tsconfig.json tsconfig.base.json tsconfig.host.json tsconfig.client.json tsdown.config.ts ./
-# host 工程的 include 覆盖 apps/packages/scripts/website 四个顶层目录，缺一不可
 COPY scripts scripts
 COPY website website
-# 工作区 lib/ 由构建机预构建（见 docs）。根复合构建 tsc -b tsconfig.host.json
-# 在本 fork 工作树存在与运行时无关的遗留 TS6307（上游复合工程边界问题），因此
-# 镜像内不重建全库，改为对 AIAgent 容器契约产物做强制验证门——缺失或不可加载
-# 即镜像失败。
-# install 用 --ignore-scripts 保证网络鲁棒性；原生模块的 install 脚本（node-gyp）
-# 在此显式补跑。历史上 fs-ext（上游 session write-ownership lease）必须在此编译；
-# 上游 d927cbff99（+852 合并内）以预编译 flock（native/system bin/*/system.node，
-# 由下方 prebuilds 段组装+验证）替代后，安装树可以合法地不含 fs-ext——存在则必须
-# 编译成功并验证产物（target_name=fs_ext → build/Release/fs_ext.node），缺席则
-# 显式声明（不再静默空转）。
-RUN set -eux; \
-    dirs=$(find /app/node_modules/.pnpm -maxdepth 1 -name 'fs-ext@*' -type d); \
-    if [ -z "$dirs" ]; then \
-      echo 'fs-ext absent from install tree (superseded by prebuilt flock, upstream d927cbff99) — nothing to build'; \
-    else \
-      for d in $dirs; do \
-        (cd "$d/node_modules/fs-ext" && npx node-gyp rebuild); \
-        test -f "$d/node_modules/fs-ext/build/Release/fs_ext.node"; \
-      done; \
-    fi
-# 上游 native/system 平台包（@deepseek-ai/node-addon-system-<os>-<arch>）的 bin/ 是
-# 发布产物（git 只含 prebuilds.json 清单）；workspace 以 optionalDependencies 链接
-# 这些目录，构建容器实际加载的就是工作树副本。按 builder 实际平台从 registry 的
-# 预编译包解出二进制补齐，否则 flock/landlock 运行时 MODULE_NOT_FOUND，
-# web 会话一启动即「本轮运行失败」。
-# 版本按 $plat 各自 package.json 读取（x64 构建不再误读 arm64 版本）；npmmirror
-# 拉取失败清残留后回退官方源；解包后按该平台 prebuilds.json 清单逐项验证，
-# 不再只测 glibc/system.node 单文件。
-RUN set -eux; \
-    plat="linux-$(node -p 'process.arch === "arm64" ? "arm64" : "x64"')"; \
-    ver="$(node -p "require('/app/native/system/packages/$plat/package.json').version")"; \
-    mkdir -p /tmp/prebuild && cd /tmp/prebuild; \
-    (npm pack "@deepseek-ai/node-addon-system-$plat@$ver" --silent \
-      || { rm -f ./*.tgz; \
-           npm pack "@deepseek-ai/node-addon-system-$plat@$ver" --silent --registry=https://registry.npmjs.org; }); \
-    tar -xzf ./*.tgz package/bin; \
-    mkdir -p "/app/native/system/packages/$plat/bin"; \
-    cp -r package/bin/. "/app/native/system/packages/$plat/bin/"; \
-    node -e 'const fs=require("fs");const plat=process.argv[1];const dir="/app/native/system/packages/"+plat+"/";const m=JSON.parse(fs.readFileSync(dir+"prebuilds.json","utf8"));const missing=m.binaries.filter(b=>!fs.existsSync(dir+b.path));if(missing.length){console.error("missing prebuilds for "+plat+": "+missing.map(b=>b.path).join(", "));process.exit(1)}console.log("prebuilds gate OK: "+m.binaries.length+" binaries for "+plat)' "$plat"
-RUN node --input-type=module -e "\
-    import('/app/packages/integration/plugin-kestra-run/lib/index.js')\
-      .then(m => { if (m.name !== 'kestra-run') throw new Error('bad plugin name: ' + m.name);\
-        console.log('kestra-run plugin module OK'); })\
-      .catch(e => { console.error(e); process.exit(1); })" \
- && test -x /app/packages/integration/plugin-kestra-run/bin/dsh-run.mjs \
- && test -f /app/packages/integration/plugin-kestra-run/dsh.patch.yml \
- && test -f /app/packages/integration/plugin-kestra-run/lib/types/index.d.ts \
- && echo "dsh runtime contract artifacts OK"
+COPY tsconfig.json tsconfig.base.json tsconfig.host.json tsconfig.client.json tsdown.config.ts ./
 
-# ── runtime：构建产物 + 启动入口 ─────────────────────────────────────────────
-FROM node:24-slim
-# NPM_CONFIG_REGISTRY 仅影响 npm/npx；pnpm 读 .npmrc（npmmirror 主源，2026-09-16 网络实测）
-ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+ENV PATH="/app/node_modules/.bin:${PATH}" \
     DSH_HOME=/root/.dsh
-RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmmirror.com --fetch-timeout=300000 --fetch-retries=5
-WORKDIR /app
-COPY --from=builder /app /app
-ENV PATH="/app/node_modules/.bin:${PATH}"
 VOLUME ["/root/.dsh"]
 EXPOSE 3000
 # 默认 headless 一次性入口；web 模式由 compose/Kestra 以

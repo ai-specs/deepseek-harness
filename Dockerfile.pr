@@ -1,0 +1,74 @@
+# dsh(PC) 运行时镜像 —— CI/PR 全量构建形态（不依赖本地 dsh-base:dev）
+#
+# 角色定位：单文件自包含构建（builder 容器内 pnpm install + 原生预编译 +
+# 契约门 → runtime 拷贝产物）。供 CI/PR 在干净环境从零构建（无本地 base 依赖、
+# 无缓存，官方 LATEST 等新鲜语义天然成立）。平台差异与 Dockerfile.base 同理：
+# 所有编译都在 Linux 容器内按实际平台完成，宿主不参与。
+#
+# 本地 dev 请用默认 Dockerfile（FROM dsh-base:dev 增量）；依赖变更用
+# Dockerfile.base 重建底座（bun run build:dsh:base）。
+FROM node:24-slim AS builder
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmmirror.com --fetch-timeout=300000 --fetch-retries=5
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc* ./
+COPY patches patches
+COPY vendor vendor
+COPY native native
+COPY packages packages
+COPY apps apps
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    (CI=true pnpm install --no-frozen-lockfile --ignore-scripts \
+      --registry=https://registry.npmjs.org \
+      --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-maxtimeout=120000 \
+  || CI=true pnpm install --no-frozen-lockfile --ignore-scripts \
+      --registry=https://registry.npmjs.org \
+      --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-maxtimeout=120000)
+COPY tsconfig.json tsconfig.base.json tsconfig.host.json tsconfig.client.json tsdown.config.ts ./
+COPY scripts scripts
+COPY website website
+RUN set -eux; \
+    dirs=$(find /app/node_modules/.pnpm -maxdepth 1 -name 'fs-ext@*' -type d); \
+    if [ -z "$dirs" ]; then \
+      echo 'fs-ext absent from install tree (superseded by prebuilt flock, upstream d927cbff99) — nothing to build'; \
+    else \
+      for d in $dirs; do \
+        (cd "$d/node_modules/fs-ext" && npx node-gyp rebuild); \
+        test -f "$d/node_modules/fs-ext/build/Release/fs_ext.node"; \
+      done; \
+    fi
+RUN set -eux; \
+    plat="linux-$(node -p 'process.arch === "arm64" ? "arm64" : "x64"')"; \
+    ver="$(node -p "require('/app/native/system/packages/$plat/package.json').version")"; \
+    mkdir -p /tmp/prebuild && cd /tmp/prebuild; \
+    (npm pack "@deepseek-ai/node-addon-system-$plat@$ver" --silent \
+      || { rm -f ./*.tgz; \
+           npm pack "@deepseek-ai/node-addon-system-$plat@$ver" --silent --registry=https://registry.npmjs.org; }); \
+    tar -xzf ./*.tgz package/bin; \
+    mkdir -p "/app/native/system/packages/$plat/bin"; \
+    cp -r package/bin/. "/app/native/system/packages/$plat/bin/"; \
+    node -e 'const fs=require("fs");const plat=process.argv[1];const dir="/app/native/system/packages/"+plat+"/";const m=JSON.parse(fs.readFileSync(dir+"prebuilds.json","utf8"));const missing=m.binaries.filter(b=>!fs.existsSync(dir+b.path));if(missing.length){console.error("missing prebuilds for "+plat+": "+missing.map(b=>b.path).join(", "));process.exit(1)}console.log("prebuilds gate OK: "+m.binaries.length+" binaries for "+plat)' "$plat"
+RUN node --input-type=module -e "\
+    import('/app/packages/integration/plugin-kestra-run/lib/index.js')\
+      .then(m => { if (m.name !== 'kestra-run') throw new Error('bad plugin name: ' + m.name);\
+        console.log('kestra-run plugin module OK'); })\
+      .catch(e => { console.error(e); process.exit(1); })" \
+ && test -x /app/packages/integration/plugin-kestra-run/bin/dsh-run.mjs \
+ && test -f /app/packages/integration/plugin-kestra-run/dsh.patch.yml \
+ && test -f /app/packages/integration/plugin-kestra-run/lib/types/index.d.ts \
+ && echo "dsh runtime contract artifacts OK"
+
+FROM node:24-slim
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    DSH_HOME=/root/.dsh
+RUN npm install -g pnpm@11.7.0 --registry=https://registry.npmmirror.com --fetch-timeout=300000 --fetch-retries=5
+WORKDIR /app
+COPY --from=builder /app /app
+ENV PATH="/app/node_modules/.bin:${PATH}"
+VOLUME ["/root/.dsh"]
+EXPOSE 3000
+CMD ["node", "/app/packages/integration/plugin-kestra-run/bin/dsh-run.mjs"]
