@@ -2085,20 +2085,50 @@ def minimal_snapshot_message(message: object, cwd: Path) -> dict[str, object]:
     role = message.get("role")
     if role == "system":
         return {"role": role, "text": minimal_snapshot_text(message_text(message.get("content")), cwd)}
-    if role == "user":
+    if role in ("user", "tool"):
+        # chat-completions keeps text-only user content as a plain string and
+        # tool results as separate role=tool messages; the Messages shape folds
+        # both into user content blocks. Normalize to one stable snapshot form.
+        raw = message.get("content", [])
+        if isinstance(raw, str):
+            blocks = [{"type": "text", "text": raw}] if raw else []
+        elif isinstance(raw, list):
+            blocks = raw
+        else:
+            blocks = []
         content = []
-        for block in message.get("content", []):
+        for block in blocks:
+            if not isinstance(block, dict):
+                # chat-completions compact content may carry non-block entries.
+                continue
             if block.get("type") == "tool_result":
                 content.append({"type": "tool_result", "tool_use_id": block.get("tool_use_id"), "content": "{{tool-result}}"})
             elif block.get("type") == "text":
                 content.append(minimal_snapshot_text(block, cwd))
             else:
                 raise AssertionError(f"minimal user message has unexpected content: {block}")
-        return {"role": role, "content": content}
+        if role == "tool" and isinstance(message.get("tool_call_id"), str):
+            content.append({
+                "type": "tool_result",
+                "tool_use_id": message["tool_call_id"],
+                "content": "{{tool-result}}",
+            })
+        return {"role": "user", "content": content}
     if role == "assistant":
         calls = message.get("content")
         if not isinstance(calls, list):
-            raise AssertionError(f"minimal assistant message has no tool calls: {message}")
+            # chat-completions assistant text carries no tool calls.
+            calls = []
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            return {
+                "role": role,
+                "toolCalls": [
+                    {"id": call.get("id"), "name": (call.get("function") or {}).get("name")}
+                    for call in tool_calls
+                    if isinstance(call, dict) and isinstance(call.get("function"), dict)
+                ],
+            }
         return {
             "role": role,
             "toolCalls": [
