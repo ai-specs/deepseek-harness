@@ -8,6 +8,9 @@
 
 - id: llm-deepseek
   config:
+    # dsh fork: DashScope compatible-mode speaks chat-completions (upstream
+    # default protocol is messages, which would 404 against it).
+    protocol: chat-completions
     thinking: enabled
     reasoningEffort: max
     models:

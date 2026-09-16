@@ -60,6 +60,9 @@ export async function codingHarness(workdir: string, options: CodingHarnessOptio
   })
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(LlmDeepSeek, {
+    // dsh fork: DashScope compatible-mode speaks chat-completions; the
+    // upstream default protocol (messages) would 404 against it.
+    protocol: 'chat-completions',
     ...options.modelContextWindow === undefined ? {} : {
       models: [{ id: 'deepseek-v4-flash', contextWindow: options.modelContextWindow }],
     },
