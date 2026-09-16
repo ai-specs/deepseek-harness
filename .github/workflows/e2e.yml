@@ -132,4 +132,14 @@ jobs:
           DSH_E2E_SKIP_MODEL_BEHAVIOR: '1'
           DSH_E2E_MAX_WORKERS: 4
           DSH_EXAMPLE_MODE: lib
-        run: pnpm run test:e2e
+        run: |
+          # TEMP-DIAG: dump the booted llm-deepseek config for the profiles the
+          # e2e suites spawn, to see which protocol/baseURL actually resolves.
+          for prof in acp dsh headless; do
+            echo "===== profile $prof llm-deepseek ====="
+            node apps/cli/lib/bin.js --profile "$prof" --dump-config 2>&1 \
+              | grep -A10 -B1 "id: llm-deepseek" || true
+          done
+          echo "===== env (key redacted) ====="
+          env | grep -E "DEEPSEEK|DSH_" | sed -E 's/(DEEPSEEK_API_KEY=).*/\1<redacted>/' || true
+          pnpm run test:e2e
