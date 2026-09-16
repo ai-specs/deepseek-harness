@@ -44,6 +44,9 @@ async function boot(models?: Messages.Config['models']) {
   cleanups.push(() => ctx.fiber.dispose())
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(Messages, {
+    // dsh fork: this suite tests the Messages wire protocol explicitly; the
+    // fork default is chat-completions, so pin the protocol here.
+    protocol: 'messages',
     baseURL: E2E_BASE_URL,
     maxTokens: 4096,
     ...models === undefined ? {} : { models },
