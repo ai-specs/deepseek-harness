@@ -350,26 +350,9 @@
           "source": {
             "kind": "model",
             "provider": "deepseek-official",
-            "model": "smoke-model",
-            "replayState": {
-              "response": {
-                "kind": "deepseek-messages",
-                "version": 1,
-                "model": "smoke-model"
-              },
-              "blocks": [
-                {
-                  "type": "tool-call"
-                }
-              ]
-            }
+            "model": "smoke-model"
           },
           "id": "{{messageId}}"
-        },
-        "usage": {
-          "inputTokens": 3,
-          "outputTokens": 3,
-          "totalTokens": 6
         },
         "stream": [
           {
@@ -385,20 +368,13 @@
             "type": "tool-call-chunks",
             "time0": 0,
             "index": 0,
-            "dt": [],
+            "dt": [
+              0
+            ],
             "id": "advanced-define",
             "name": "cordis_define",
             "args": [
-              ""
-            ]
-          },
-          {
-            "type": "tool-call-chunks",
-            "time0": 0,
-            "index": 0,
-            "dt": [],
-            "id": "advanced-define",
-            "args": [
+              "",
               "{\"plugin\": {\"kind\": \"new\", \"idPrefix\": \"snap\"}, \"name\": \"Snapshot Double\", \"purpose\": \"Expose a deterministic doubling tool for executable snapshot verification.\", \"code\": {\"host\": \"return (ctx) => {\\n  ctx.on('tools/pre-execute', (exec, next) => {\\n    if (exec.name !== 'snapshot_double' || exec.arguments.value !== -1) return next()\\n    return {\\n      kind: 'deny',\\n      reason: 'Auto review rejected tool \\\"snapshot_double\\\"; its body was not executed',\\n      info: {\\n        name: 'AutoReviewDeniedError', code: 'AUTO_REVIEW_DENIED',\\n        reason: '  transport raw\\\\r\\\\nreason  ',\\n      },\\n    }\\n  })\\n  harness.registerTool(ctx, harness.defineTool({\\n    name: 'snapshot_double',\\n    description: 'Double a number for executable snapshot verification.',\\n    parameters: { value: { type: 'number', required: true } },\\n    output: {\\n      schema: { type: 'number' },\\n      render(_args, value) {\\n        return [{ type: 'text', text: String(value) }]\\n      }\\n    },\\n    async execute(args) {\\n      return args.value * 2\\n    }\\n  }))\\n}\\n\"}}"
             ]
           },
@@ -420,33 +396,9 @@
             "type": "chunk",
             "time": 0,
             "chunk": {
-              "type": "usage",
-              "usage": {
-                "inputTokens": 3,
-                "outputTokens": 3,
-                "totalTokens": 6
-              }
-            }
-          },
-          {
-            "type": "chunk",
-            "time": 0,
-            "chunk": {
               "type": "finish",
               "reason": {
                 "kind": "tool-calls"
-              },
-              "replayState": {
-                "response": {
-                  "kind": "deepseek-messages",
-                  "version": 1,
-                  "model": "smoke-model"
-                },
-                "blocks": [
-                  {
-                    "type": "tool-call"
-                  }
-                ]
               }
             }
           }
@@ -552,26 +504,9 @@
           "source": {
             "kind": "model",
             "provider": "deepseek-official",
-            "model": "smoke-model",
-            "replayState": {
-              "response": {
-                "kind": "deepseek-messages",
-                "version": 1,
-                "model": "smoke-model"
-              },
-              "blocks": [
-                {
-                  "type": "tool-call"
-                }
-              ]
-            }
+            "model": "smoke-model"
           },
           "id": "{{messageId}}"
-        },
-        "usage": {
-          "inputTokens": 3,
-          "outputTokens": 3,
-          "totalTokens": 6
         },
         "stream": [
           {
@@ -587,20 +522,13 @@
             "type": "tool-call-chunks",
             "time0": 0,
             "index": 0,
-            "dt": [],
+            "dt": [
+              0
+            ],
             "id": "advanced-run",
             "name": "cordis_run",
             "args": [
-              ""
-            ]
-          },
-          {
-            "type": "tool-call-chunks",
-            "time0": 0,
-            "index": 0,
-            "dt": [],
-            "id": "advanced-run",
-            "args": [
+              "",
               "{\"pluginId\": \"snap-1\", \"packageId\": \"pkg-1\", \"mode\": \"run\"}"
             ]
           },
@@ -622,33 +550,9 @@
             "type": "chunk",
             "time": 0,
             "chunk": {
-              "type": "usage",
-              "usage": {
-                "inputTokens": 3,
-                "outputTokens": 3,
-                "totalTokens": 6
-              }
-            }
-          },
-          {
-            "type": "chunk",
-            "time": 0,
-            "chunk": {
               "type": "finish",
               "reason": {
                 "kind": "tool-calls"
-              },
-              "replayState": {
-                "response": {
-                  "kind": "deepseek-messages",
-                  "version": 1,
-                  "model": "smoke-model"
-                },
-                "blocks": [
-                  {
-                    "type": "tool-call"
-                  }
-                ]
               }
             }
           }
@@ -823,26 +727,9 @@
           "source": {
             "kind": "model",
             "provider": "deepseek-official",
-            "model": "smoke-model",
-            "replayState": {
-              "response": {
-                "kind": "deepseek-messages",
-                "version": 1,
-                "model": "smoke-model"
-              },
-              "blocks": [
-                {
-                  "type": "tool-call"
-                }
-              ]
-            }
+            "model": "smoke-model"
           },
           "id": "{{messageId}}"
-        },
-        "usage": {
-          "inputTokens": 3,
-          "outputTokens": 3,
-          "totalTokens": 6
         },
         "stream": [
           {
@@ -858,20 +745,13 @@
             "type": "tool-call-chunks",
             "time0": 0,
             "index": 0,
-            "dt": [],
+            "dt": [
+              0
+            ],
             "id": "advanced-code",
             "name": "run_code",
             "args": [
-              ""
-            ]
-          },
-          {
-            "type": "tool-call-chunks",
-            "time0": 0,
-            "index": 0,
-            "dt": [],
-            "id": "advanced-code",
-            "args": [
+              "",
               "{\"code\": \"return await tools.snapshot_double({ value: 21 })\", \"description\": \"Run the temporary Plugin tool\"}"
             ]
           },
@@ -893,33 +773,9 @@
             "type": "chunk",
             "time": 0,
             "chunk": {
-              "type": "usage",
-              "usage": {
-                "inputTokens": 3,
-                "outputTokens": 3,
-                "totalTokens": 6
-              }
-            }
-          },
-          {
-            "type": "chunk",
-            "time": 0,
-            "chunk": {
               "type": "finish",
               "reason": {
                 "kind": "tool-calls"
-              },
-              "replayState": {
-                "response": {
-                  "kind": "deepseek-messages",
-                  "version": 1,
-                  "model": "smoke-model"
-                },
-                "blocks": [
-                  {
-                    "type": "tool-call"
-                  }
-                ]
               }
             }
           }
@@ -1056,26 +912,9 @@
           "source": {
             "kind": "model",
             "provider": "deepseek-official",
-            "model": "smoke-model",
-            "replayState": {
-              "response": {
-                "kind": "deepseek-messages",
-                "version": 1,
-                "model": "smoke-model"
-              },
-              "blocks": [
-                {
-                  "type": "tool-call"
-                }
-              ]
-            }
+            "model": "smoke-model"
           },
           "id": "{{messageId}}"
-        },
-        "usage": {
-          "inputTokens": 3,
-          "outputTokens": 3,
-          "totalTokens": 6
         },
         "stream": [
           {
@@ -1091,20 +930,13 @@
             "type": "tool-call-chunks",
             "time0": 0,
             "index": 0,
-            "dt": [],
+            "dt": [
+              0
+            ],
             "id": "advanced-denied-native",
             "name": "snapshot_double",
             "args": [
-              ""
-            ]
-          },
-          {
-            "type": "tool-call-chunks",
-            "time0": 0,
-            "index": 0,
-            "dt": [],
-            "id": "advanced-denied-native",
-            "args": [
+              "",
               "{\"value\": -1}"
             ]
           },
@@ -1126,33 +958,9 @@
             "type": "chunk",
             "time": 0,
             "chunk": {
-              "type": "usage",
-              "usage": {
-                "inputTokens": 3,
-                "outputTokens": 3,
-                "totalTokens": 6
-              }
-            }
-          },
-          {
-            "type": "chunk",
-            "time": 0,
-            "chunk": {
               "type": "finish",
               "reason": {
                 "kind": "tool-calls"
-              },
-              "replayState": {
-                "response": {
-                  "kind": "deepseek-messages",
-                  "version": 1,
-                  "model": "smoke-model"
-                },
-                "blocks": [
-                  {
-                    "type": "tool-call"
-                  }
-                ]
               }
             }
           }
@@ -1259,26 +1067,9 @@
           "source": {
             "kind": "model",
             "provider": "deepseek-official",
-            "model": "smoke-model",
-            "replayState": {
-              "response": {
-                "kind": "deepseek-messages",
-                "version": 1,
-                "model": "smoke-model"
-              },
-              "blocks": [
-                {
-                  "type": "tool-call"
-                }
-              ]
-            }
+            "model": "smoke-model"
           },
           "id": "{{messageId}}"
-        },
-        "usage": {
-          "inputTokens": 3,
-          "outputTokens": 3,
-          "totalTokens": 6
         },
         "stream": [
           {
@@ -1294,20 +1085,13 @@
             "type": "tool-call-chunks",
             "time0": 0,
             "index": 0,
-            "dt": [],
+            "dt": [
+              0
+            ],
             "id": "advanced-denied-ptc",
             "name": "run_code",
             "args": [
-              ""
-            ]
-          },
-          {
-            "type": "tool-call-chunks",
-            "time0": 0,
-            "index": 0,
-            "dt": [],
-            "id": "advanced-denied-ptc",
-            "args": [
+              "",
               "{\"code\": \"try { await tools.snapshot_double({ value: -1 }) } catch (error) { return error.message }\", \"description\": \"Catch a structured inner tool denial\"}"
             ]
           },
@@ -1329,33 +1113,9 @@
             "type": "chunk",
             "time": 0,
             "chunk": {
-              "type": "usage",
-              "usage": {
-                "inputTokens": 3,
-                "outputTokens": 3,
-                "totalTokens": 6
-              }
-            }
-          },
-          {
-            "type": "chunk",
-            "time": 0,
-            "chunk": {
               "type": "finish",
               "reason": {
                 "kind": "tool-calls"
-              },
-              "replayState": {
-                "response": {
-                  "kind": "deepseek-messages",
-                  "version": 1,
-                  "model": "smoke-model"
-                },
-                "blocks": [
-                  {
-                    "type": "tool-call"
-                  }
-                ]
               }
             }
           }
@@ -1497,26 +1257,9 @@
           "source": {
             "kind": "model",
             "provider": "deepseek-official",
-            "model": "smoke-model",
-            "replayState": {
-              "response": {
-                "kind": "deepseek-messages",
-                "version": 1,
-                "model": "smoke-model"
-              },
-              "blocks": [
-                {
-                  "type": "tool-call"
-                }
-              ]
-            }
+            "model": "smoke-model"
           },
           "id": "{{messageId}}"
-        },
-        "usage": {
-          "inputTokens": 3,
-          "outputTokens": 3,
-          "totalTokens": 6
         },
         "stream": [
           {
@@ -1532,20 +1275,13 @@
             "type": "tool-call-chunks",
             "time0": 0,
             "index": 0,
-            "dt": [],
+            "dt": [
+              0
+            ],
             "id": "advanced-direct-child",
             "name": "subagent",
             "args": [
-              ""
-            ]
-          },
-          {
-            "type": "tool-call-chunks",
-            "time0": 0,
-            "index": 0,
-            "dt": [],
-            "id": "advanced-direct-child",
-            "args": [
+              "",
               "{\"description\": \"Check direct child\", \"prompt\": \"Reply with exactly DIRECT_CHILD_OK and nothing else.\"}"
             ]
           },
@@ -1567,33 +1303,9 @@
             "type": "chunk",
             "time": 0,
             "chunk": {
-              "type": "usage",
-              "usage": {
-                "inputTokens": 3,
-                "outputTokens": 3,
-                "totalTokens": 6
-              }
-            }
-          },
-          {
-            "type": "chunk",
-            "time": 0,
-            "chunk": {
               "type": "finish",
               "reason": {
                 "kind": "tool-calls"
-              },
-              "replayState": {
-                "response": {
-                  "kind": "deepseek-messages",
-                  "version": 1,
-                  "model": "smoke-model"
-                },
-                "blocks": [
-                  {
-                    "type": "tool-call"
-                  }
-                ]
               }
             }
           }
@@ -1707,26 +1419,9 @@
           "source": {
             "kind": "model",
             "provider": "deepseek-official",
-            "model": "smoke-model",
-            "replayState": {
-              "response": {
-                "kind": "deepseek-messages",
-                "version": 1,
-                "model": "smoke-model"
-              },
-              "blocks": [
-                {
-                  "type": "tool-call"
-                }
-              ]
-            }
+            "model": "smoke-model"
           },
           "id": "{{messageId}}"
-        },
-        "usage": {
-          "inputTokens": 3,
-          "outputTokens": 3,
-          "totalTokens": 6
         },
         "stream": [
           {
@@ -1742,20 +1437,13 @@
             "type": "tool-call-chunks",
             "time0": 0,
             "index": 0,
-            "dt": [],
+            "dt": [
+              0
+            ],
             "id": "advanced-workflow",
             "name": "workflow",
             "args": [
-              ""
-            ]
-          },
-          {
-            "type": "tool-call-chunks",
-            "time0": 0,
-            "index": 0,
-            "dt": [],
-            "id": "advanced-workflow",
-            "args": [
+              "",
               "{\"script\": \"phase('Delegate')\\nconst reply = await agent('Reply with exactly WORKFLOW_CHILD_OK and nothing else.', { label: 'workflow-child' })\\nreturn { reply }\", \"meta\": {\"name\": \"advanced-exe-snapshot\", \"description\": \"exercise one packaged workflow child\"}}"
             ]
           },
@@ -1777,33 +1465,9 @@
             "type": "chunk",
             "time": 0,
             "chunk": {
-              "type": "usage",
-              "usage": {
-                "inputTokens": 3,
-                "outputTokens": 3,
-                "totalTokens": 6
-              }
-            }
-          },
-          {
-            "type": "chunk",
-            "time": 0,
-            "chunk": {
               "type": "finish",
               "reason": {
                 "kind": "tool-calls"
-              },
-              "replayState": {
-                "response": {
-                  "kind": "deepseek-messages",
-                  "version": 1,
-                  "model": "smoke-model"
-                },
-                "blocks": [
-                  {
-                    "type": "tool-call"
-                  }
-                ]
               }
             }
           }
@@ -1956,26 +1620,9 @@
           "source": {
             "kind": "model",
             "provider": "deepseek-official",
-            "model": "smoke-model",
-            "replayState": {
-              "response": {
-                "kind": "deepseek-messages",
-                "version": 1,
-                "model": "smoke-model"
-              },
-              "blocks": [
-                {
-                  "type": "tool-call"
-                }
-              ]
-            }
+            "model": "smoke-model"
           },
           "id": "{{messageId}}"
-        },
-        "usage": {
-          "inputTokens": 3,
-          "outputTokens": 3,
-          "totalTokens": 6
         },
         "stream": [
           {
@@ -1991,20 +1638,13 @@
             "type": "tool-call-chunks",
             "time0": 0,
             "index": 0,
-            "dt": [],
+            "dt": [
+              0
+            ],
             "id": "advanced-undefine",
             "name": "cordis_undefine",
             "args": [
-              ""
-            ]
-          },
-          {
-            "type": "tool-call-chunks",
-            "time0": 0,
-            "index": 0,
-            "dt": [],
-            "id": "advanced-undefine",
-            "args": [
+              "",
               "{\"pluginId\": \"snap-1\"}"
             ]
           },
@@ -2026,33 +1666,9 @@
             "type": "chunk",
             "time": 0,
             "chunk": {
-              "type": "usage",
-              "usage": {
-                "inputTokens": 3,
-                "outputTokens": 3,
-                "totalTokens": 6
-              }
-            }
-          },
-          {
-            "type": "chunk",
-            "time": 0,
-            "chunk": {
               "type": "finish",
               "reason": {
                 "kind": "tool-calls"
-              },
-              "replayState": {
-                "response": {
-                  "kind": "deepseek-messages",
-                  "version": 1,
-                  "model": "smoke-model"
-                },
-                "blocks": [
-                  {
-                    "type": "tool-call"
-                  }
-                ]
               }
             }
           }
@@ -2219,26 +1835,9 @@
           "source": {
             "kind": "model",
             "provider": "deepseek-official",
-            "model": "smoke-model",
-            "replayState": {
-              "response": {
-                "kind": "deepseek-messages",
-                "version": 1,
-                "model": "smoke-model"
-              },
-              "blocks": [
-                {
-                  "type": "text"
-                }
-              ]
-            }
+            "model": "smoke-model"
           },
           "id": "{{message:1}}"
-        },
-        "usage": {
-          "inputTokens": 3,
-          "outputTokens": 3,
-          "totalTokens": 6
         },
         "stream": [
           {
@@ -2275,33 +1874,9 @@
             "type": "chunk",
             "time": 0,
             "chunk": {
-              "type": "usage",
-              "usage": {
-                "inputTokens": 3,
-                "outputTokens": 3,
-                "totalTokens": 6
-              }
-            }
-          },
-          {
-            "type": "chunk",
-            "time": 0,
-            "chunk": {
               "type": "finish",
               "reason": {
                 "kind": "stop"
-              },
-              "replayState": {
-                "response": {
-                  "kind": "deepseek-messages",
-                  "version": 1,
-                  "model": "smoke-model"
-                },
-                "blocks": [
-                  {
-                    "type": "text"
-                  }
-                ]
               }
             }
           }
@@ -2872,26 +2447,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "tool-call"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -2907,20 +2465,13 @@
                 "type": "tool-call-chunks",
                 "time0": 0,
                 "index": 0,
-                "dt": [],
+                "dt": [
+                  0
+                ],
                 "id": "advanced-define",
                 "name": "cordis_define",
                 "args": [
-                  ""
-                ]
-              },
-              {
-                "type": "tool-call-chunks",
-                "time0": 0,
-                "index": 0,
-                "dt": [],
-                "id": "advanced-define",
-                "args": [
+                  "",
                   "{\"plugin\": {\"kind\": \"new\", \"idPrefix\": \"snap\"}, \"name\": \"Snapshot Double\", \"purpose\": \"Expose a deterministic doubling tool for executable snapshot verification.\", \"code\": {\"host\": \"return (ctx) => {\\n  ctx.on('tools/pre-execute', (exec, next) => {\\n    if (exec.name !== 'snapshot_double' || exec.arguments.value !== -1) return next()\\n    return {\\n      kind: 'deny',\\n      reason: 'Auto review rejected tool \\\"snapshot_double\\\"; its body was not executed',\\n      info: {\\n        name: 'AutoReviewDeniedError', code: 'AUTO_REVIEW_DENIED',\\n        reason: '  transport raw\\\\r\\\\nreason  ',\\n      },\\n    }\\n  })\\n  harness.registerTool(ctx, harness.defineTool({\\n    name: 'snapshot_double',\\n    description: 'Double a number for executable snapshot verification.',\\n    parameters: { value: { type: 'number', required: true } },\\n    output: {\\n      schema: { type: 'number' },\\n      render(_args, value) {\\n        return [{ type: 'text', text: String(value) }]\\n      }\\n    },\\n    async execute(args) {\\n      return args.value * 2\\n    }\\n  }))\\n}\\n\"}}"
                 ]
               },
@@ -2942,33 +2493,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "tool-calls"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "tool-call"
-                      }
-                    ]
                   }
                 }
               }
@@ -3110,26 +2637,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "tool-call"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -3145,20 +2655,13 @@
                 "type": "tool-call-chunks",
                 "time0": 0,
                 "index": 0,
-                "dt": [],
+                "dt": [
+                  0
+                ],
                 "id": "advanced-run",
                 "name": "cordis_run",
                 "args": [
-                  ""
-                ]
-              },
-              {
-                "type": "tool-call-chunks",
-                "time0": 0,
-                "index": 0,
-                "dt": [],
-                "id": "advanced-run",
-                "args": [
+                  "",
                   "{\"pluginId\": \"snap-1\", \"packageId\": \"pkg-1\", \"mode\": \"run\"}"
                 ]
               },
@@ -3180,33 +2683,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "tool-calls"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "tool-call"
-                      }
-                    ]
                   }
                 }
               }
@@ -3429,26 +2908,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "tool-call"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -3464,20 +2926,13 @@
                 "type": "tool-call-chunks",
                 "time0": 0,
                 "index": 0,
-                "dt": [],
+                "dt": [
+                  0
+                ],
                 "id": "advanced-code",
                 "name": "run_code",
                 "args": [
-                  ""
-                ]
-              },
-              {
-                "type": "tool-call-chunks",
-                "time0": 0,
-                "index": 0,
-                "dt": [],
-                "id": "advanced-code",
-                "args": [
+                  "",
                   "{\"code\": \"return await tools.snapshot_double({ value: 21 })\", \"description\": \"Run the temporary Plugin tool\"}"
                 ]
               },
@@ -3499,33 +2954,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "tool-calls"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "tool-call"
-                      }
-                    ]
                   }
                 }
               }
@@ -3710,26 +3141,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "tool-call"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -3745,20 +3159,13 @@
                 "type": "tool-call-chunks",
                 "time0": 0,
                 "index": 0,
-                "dt": [],
+                "dt": [
+                  0
+                ],
                 "id": "advanced-denied-native",
                 "name": "snapshot_double",
                 "args": [
-                  ""
-                ]
-              },
-              {
-                "type": "tool-call-chunks",
-                "time0": 0,
-                "index": 0,
-                "dt": [],
-                "id": "advanced-denied-native",
-                "args": [
+                  "",
                   "{\"value\": -1}"
                 ]
               },
@@ -3780,33 +3187,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "tool-calls"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "tool-call"
-                      }
-                    ]
                   }
                 }
               }
@@ -3949,26 +3332,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "tool-call"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -3984,20 +3350,13 @@
                 "type": "tool-call-chunks",
                 "time0": 0,
                 "index": 0,
-                "dt": [],
+                "dt": [
+                  0
+                ],
                 "id": "advanced-denied-ptc",
                 "name": "run_code",
                 "args": [
-                  ""
-                ]
-              },
-              {
-                "type": "tool-call-chunks",
-                "time0": 0,
-                "index": 0,
-                "dt": [],
-                "id": "advanced-denied-ptc",
-                "args": [
+                  "",
                   "{\"code\": \"try { await tools.snapshot_double({ value: -1 }) } catch (error) { return error.message }\", \"description\": \"Catch a structured inner tool denial\"}"
                 ]
               },
@@ -4019,33 +3378,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "tool-calls"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "tool-call"
-                      }
-                    ]
                   }
                 }
               }
@@ -4235,26 +3570,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "tool-call"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -4270,20 +3588,13 @@
                 "type": "tool-call-chunks",
                 "time0": 0,
                 "index": 0,
-                "dt": [],
+                "dt": [
+                  0
+                ],
                 "id": "advanced-direct-child",
                 "name": "subagent",
                 "args": [
-                  ""
-                ]
-              },
-              {
-                "type": "tool-call-chunks",
-                "time0": 0,
-                "index": 0,
-                "dt": [],
-                "id": "advanced-direct-child",
-                "args": [
+                  "",
                   "{\"description\": \"Check direct child\", \"prompt\": \"Reply with exactly DIRECT_CHILD_OK and nothing else.\"}"
                 ]
               },
@@ -4305,33 +3616,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "tool-calls"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "tool-call"
-                      }
-                    ]
                   }
                 }
               }
@@ -4769,26 +4056,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "text"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -4825,33 +4095,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "stop"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "text"
-                      }
-                    ]
                   }
                 }
               }
@@ -5027,26 +4273,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "tool-call"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -5062,20 +4291,13 @@
                 "type": "tool-call-chunks",
                 "time0": 0,
                 "index": 0,
-                "dt": [],
+                "dt": [
+                  0
+                ],
                 "id": "advanced-workflow",
                 "name": "workflow",
                 "args": [
-                  ""
-                ]
-              },
-              {
-                "type": "tool-call-chunks",
-                "time0": 0,
-                "index": 0,
-                "dt": [],
-                "id": "advanced-workflow",
-                "args": [
+                  "",
                   "{\"script\": \"phase('Delegate')\\nconst reply = await agent('Reply with exactly WORKFLOW_CHILD_OK and nothing else.', { label: 'workflow-child' })\\nreturn { reply }\", \"meta\": {\"name\": \"advanced-exe-snapshot\", \"description\": \"exercise one packaged workflow child\"}}"
                 ]
               },
@@ -5097,33 +4319,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "tool-calls"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "tool-call"
-                      }
-                    ]
                   }
                 }
               }
@@ -5592,26 +4790,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "text"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -5648,33 +4829,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "stop"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "text"
-                      }
-                    ]
                   }
                 }
               }
@@ -5881,26 +5038,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "tool-call"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{messageId}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -5916,20 +5056,13 @@
                 "type": "tool-call-chunks",
                 "time0": 0,
                 "index": 0,
-                "dt": [],
+                "dt": [
+                  0
+                ],
                 "id": "advanced-undefine",
                 "name": "cordis_undefine",
                 "args": [
-                  ""
-                ]
-              },
-              {
-                "type": "tool-call-chunks",
-                "time0": 0,
-                "index": 0,
-                "dt": [],
-                "id": "advanced-undefine",
-                "args": [
+                  "",
                   "{\"pluginId\": \"snap-1\"}"
                 ]
               },
@@ -5951,33 +5084,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "tool-calls"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "tool-call"
-                      }
-                    ]
                   }
                 }
               }
@@ -6192,26 +5301,9 @@
               "source": {
                 "kind": "model",
                 "provider": "deepseek-official",
-                "model": "smoke-model",
-                "replayState": {
-                  "response": {
-                    "kind": "deepseek-messages",
-                    "version": 1,
-                    "model": "smoke-model"
-                  },
-                  "blocks": [
-                    {
-                      "type": "text"
-                    }
-                  ]
-                }
+                "model": "smoke-model"
               },
               "id": "{{message:1}}"
-            },
-            "usage": {
-              "inputTokens": 3,
-              "outputTokens": 3,
-              "totalTokens": 6
             },
             "stream": [
               {
@@ -6248,33 +5340,9 @@
                 "type": "chunk",
                 "time": 0,
                 "chunk": {
-                  "type": "usage",
-                  "usage": {
-                    "inputTokens": 3,
-                    "outputTokens": 3,
-                    "totalTokens": 6
-                  }
-                }
-              },
-              {
-                "type": "chunk",
-                "time": 0,
-                "chunk": {
                   "type": "finish",
                   "reason": {
                     "kind": "stop"
-                  },
-                  "replayState": {
-                    "response": {
-                      "kind": "deepseek-messages",
-                      "version": 1,
-                      "model": "smoke-model"
-                    },
-                    "blocks": [
-                      {
-                        "type": "text"
-                      }
-                    ]
                   }
                 }
               }
