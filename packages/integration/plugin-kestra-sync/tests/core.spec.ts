@@ -119,3 +119,33 @@ describe('KestraSessionSyncClient', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('relay SSE session.query 事件透传', () => {
+  it('afterSeq 与 since 游标随事件传给 queryHandler，不得被字段白名单丢弃', async () => {
+    const encoder = new TextEncoder()
+    const frames = [
+      'data: {"event":"session.query","data":{"requestId":"r1","type":"session.messages","sessionId":"s1","afterSeq":3}}\n\n',
+      'data: {"event":"session.query","data":{"requestId":"r2","type":"session.list","since":"2026-01-01T00:00:00.000Z"}}\n\n',
+    ].join('')
+    const queries: Array<Record<string, unknown>> = []
+    let calls = 0
+    const fetchImpl = (async () => {
+      calls += 1
+      // 首连投递事件帧；重连返回永不结束的空流，避免测试期反复消费。
+      const body = calls === 1
+        ? new ReadableStream({
+          start(controller) { controller.enqueue(encoder.encode(frames)) },
+        })
+        : new ReadableStream({ start() {} })
+      return new Response(body, { status: 200 })
+    }) as unknown as typeof fetch
+    const client = new KestraSessionSyncClient(config, fetchImpl)
+    const stop = client.startInputSse(() => {}, undefined, {
+      queryHandler: (query) => { queries.push(query as unknown as Record<string, unknown>) },
+    })
+    await new Promise((resolve) => { setTimeout(resolve, 80) })
+    stop()
+    expect(queries[0]).toMatchObject({ requestId: 'r1', type: 'session.messages', sessionId: 's1', afterSeq: 3 })
+    expect(queries[1]).toMatchObject({ requestId: 'r2', type: 'session.list', since: '2026-01-01T00:00:00.000Z' })
+  })
+})

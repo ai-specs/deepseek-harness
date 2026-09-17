@@ -17,8 +17,10 @@ import type {} from '@deepseek-ai/dsh-session'
 import {
   KestraSessionSyncClient,
   SessionIndex,
+  deriveHistory,
   foldSyncState,
   type KestraSyncConfig,
+  type RelayQuery,
   type RemoteInput,
   type SessionSnapshot,
 } from './core.ts'
@@ -512,14 +514,44 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       }, new AbortController().signal)
       const agent = host.agents.get(headlessSessionId)
       if (agent === undefined) throw new Error('SessionController accepted input without publishing the live Agent')
-      await agent.whenIdle()
-      const result = foldSyncState(agent.session.deriveMessages()).result ?? ''
+      // whenIdle 竞速超时：远程输入链是串行的，agent 卡死（如 LLM 流停滞）时若无限
+      // 等待，一个卡死的回合会堵死所有后续远程输入。超时落 failed 终态并释放链。
+      const idleTimeoutMs = (config.remoteInputTimeoutSeconds ?? 300) * 1000
+      let idleTimer: ReturnType<typeof setTimeout> | undefined
+      const timedOut = new Promise<boolean>((resolve) => {
+        idleTimer = setTimeout(() => resolve(true), idleTimeoutMs)
+        ;(idleTimer as { unref?: () => void }).unref?.()
+      })
+      const idle = agent.whenIdle().then(() => false as const)
+      const hitTimeout = await Promise.race([idle, timedOut])
+      if (idleTimer !== undefined) clearTimeout(idleTimer)
+      if (hitTimeout) {
+        process.stderr.write(`[kestra-sync] live PC agent idle timeout (${idleTimeoutMs}ms): session=${input.sessionId} headless=${headlessSessionId}\n`)
+        index.record({
+          sessionId: input.sessionId ?? headlessSessionId,
+          phase: 'failed',
+          prompt: input.text,
+          result: `执行超时：live agent ${Math.round(idleTimeoutMs / 1000)}s 未回到空闲`,
+          headlessSessionId,
+        })
+        void client.reportMetric({
+          type: 'session_end',
+          sessionId: input.sessionId ?? headlessSessionId,
+          outcome: 'failed',
+          durationMs: Date.now() - startedAt,
+        })
+        return true
+      }
+      const derived = agent.session.deriveMessages()
+      const result = foldSyncState(derived).result ?? ''
       index.record({
         sessionId: input.sessionId ?? headlessSessionId,
         phase: 'completed',
         prompt: input.text,
         ...(result === '' ? {} : { result }),
         headlessSessionId,
+        // 完整轮次（含 PC web 直发轮）作为权威历史：手机游标增量内可见 PC 插入的消息。
+        derivedHistory: deriveHistory(derived),
       })
       void client.reportMetric({
         type: 'session_end',
@@ -549,6 +581,12 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
 
   const handleRemoteInput = (input: RemoteInput): Promise<void> => {
     process.stderr.write(`[kestra-sync] DIAG input=${JSON.stringify(input)}\n`)
+    // 受理即登记 RUNNING 占位（同步，不经 chain 排队）：同一条 SSE 连接内事件有序，
+    // input 事件先于后续 session.messages 查询到达，占位保证执行期间 phase/用户消息
+    // 回显即可见（终态 record 按末位 prompt 去重，不会重复追加用户消息）。
+    if (input.sessionId !== undefined && input.sessionId !== '') {
+      index.record({ sessionId: input.sessionId, phase: 'RUNNING', prompt: input.text })
+    }
     chain.p = chain.p
       .then(() => {
         applyEnvOverrideOnce()
@@ -599,14 +637,20 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
   // 退出兜底：进程正常退出前强制落盘（防抖周期最多丢 2s 内事件，正常退出不丢）。
   process.once('exit', () => index.dispose())
 
-  // 查询应答：session.list → 索引列表；session.detail → 索引详情（未命中回填 error）。
-  const handleQuery = (query: { requestId: string; type: string; sessionId?: string }): Promise<void> => {
-    process.stderr.write(`[kestra-sync] query received: ${query.type} rid=${query.requestId}${query.sessionId ? ` sid=${query.sessionId}` : ''}\n`)
+  // 查询应答：session.list → 索引列表（时间线增量）；session.detail → 索引详情（未命中回填 error）。
+  const handleQuery = (query: RelayQuery): Promise<void> => {
+    process.stderr.write(`[kestra-sync] query received: ${query.type} rid=${query.requestId}${query.sessionId ? ` sid=${query.sessionId}` : ''}${query.since ? ` since=${query.since}` : ''}\n`)
     if (query.type === 'session.detail' && query.sessionId !== undefined) {
       const detail = index.get(query.sessionId)
       return detail === undefined
         ? client.fillQueryResult(query.requestId, query.type, undefined, 'session not found on PC')
         : client.fillQueryResult(query.requestId, query.type, detail)
+    }
+    if (query.type === 'session.messages' && query.sessionId !== undefined) {
+      const messages = index.messages(query.sessionId, Number(query.afterSeq ?? 0))
+      return messages === undefined
+        ? client.fillQueryResult(query.requestId, query.type, undefined, 'session not found on PC')
+        : client.fillQueryResult(query.requestId, query.type, messages)
     }
     if (query.type === 'workspace.list') {
       const workspaces = workspaceRegistry.list().map((workspace, position) => ({
@@ -617,7 +661,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       }))
       return client.fillQueryResult(query.requestId, query.type, workspaces)
     }
-    return client.fillQueryResult(query.requestId, query.type, index.list())
+    return client.fillQueryResult(query.requestId, query.type, index.list(query.since))
   }
 
   if (config.useSse !== false) {

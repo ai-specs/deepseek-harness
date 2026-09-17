@@ -101,6 +101,15 @@ export interface RemoteInput {
   workspaceId?: string
 }
 
+/** 中台转发的会话查询（session.query）：afterSeq=消息游标，since=列表时间线游标。 */
+export interface RelayQuery {
+  requestId: string
+  type: string
+  sessionId?: string
+  afterSeq?: number
+  since?: string
+}
+
 /** §3.3 轻量指标事件（不含会话全文——纯聚合数字，字节级）。 */
 export interface MetricEvent {
   type: 'session_start' | 'session_end' | 'tool_call' | 'approval_requested' | 'approval_resolved'
@@ -260,7 +269,7 @@ export class KestraSessionSyncClient {
     options?: {
       approvalHandler?: (decision: { sessionId: string; approved: boolean; comment?: string }) => void | Promise<void>
       /** 会话查询（session.query）处理器：从中台转发的列表/详情请求应答。 */
-      queryHandler?: (query: { requestId: string; type: string; sessionId?: string }) => void | Promise<void>
+      queryHandler?: (query: RelayQuery) => void | Promise<void>
     },
   ): () => void {
     if (this.inputSseReading) return () => this.stopInputSse()
@@ -344,7 +353,7 @@ export class KestraSessionSyncClient {
     body: ReadableStream<Uint8Array>,
     handler: (input: RemoteInput) => void | Promise<void>,
     approvalHandler?: (decision: { sessionId: string; approved: boolean; comment?: string }) => void | Promise<void>,
-    queryHandler?: (query: { requestId: string; type: string; sessionId?: string }) => void | Promise<void>,
+    queryHandler?: (query: RelayQuery) => void | Promise<void>,
   ): Promise<void> {
     const reader = body.getReader()
     const decoder = new TextDecoder()
@@ -405,6 +414,14 @@ export class KestraSessionSyncClient {
                 ...(data.sessionId === undefined || data.sessionId === null || String(data.sessionId) === ''
                   ? {}
                   : { sessionId: String(data.sessionId) }),
+                // afterSeq/since 必须随事件透传：session.messages 的 seq 游标与
+                // session.list 的时间线游标都依赖它们，丢弃会退化为全量响应。
+                ...(data.afterSeq === undefined || data.afterSeq === null
+                  ? {}
+                  : { afterSeq: Number(data.afterSeq) }),
+                ...(data.since === undefined || data.since === null || String(data.since) === ''
+                  ? {}
+                  : { since: String(data.since) }),
               })
             }
             // heartbeat / pc.status / session.result / session.approval：PC 订阅端不消费
@@ -608,6 +625,27 @@ export function foldSyncState(
   }
 }
 
+/** 从 agent 会话消息派生完整文本轮次（含 PC web 直发轮）——中继会话历史的权威投影。
+ * 运行时插件注入（runtime-context 快照等 source.kind==='plugin' 的 user 消息）不是
+ * 真实用户轮次，不进入手机投影。 */
+export function deriveHistory(
+  messages: ReadonlyArray<{ role: string; content: unknown; source?: unknown }>,
+): Array<{ role: 'user' | 'assistant'; text: string }> {
+  const isPluginInjection = (message: { source?: unknown }): boolean => {
+    const source = message.source
+    return typeof source === 'object' && source !== null
+      && (source as { kind?: unknown }).kind === 'plugin'
+  }
+  const history: Array<{ role: 'user' | 'assistant'; text: string }> = []
+  for (const message of messages) {
+    const text = textBlocksOf(message.content)
+    if (text === undefined) continue
+    if (message.role === 'user' && !isPluginInjection(message)) history.push({ role: 'user', text })
+    else if (message.role === 'assistant') history.push({ role: 'assistant', text })
+  }
+  return history
+}
+
 /** 拼接 content 的 text 块；无可见文本返回 undefined（工具调用/纯 reasoning 消息不产生摘要）。 */
 function textBlocksOf(content: unknown): string | undefined {
   const blocks = typeof content === 'string'
@@ -737,8 +775,12 @@ export class SessionIndex {
     this.scheduleFlush()
   }
 
-  /** 会话列表（按 updatedAt 倒序），供 session.list 应答。 */
-  list(): Array<Record<string, unknown>> {
+  /**
+   * 会话列表（按 updatedAt 倒序），供 session.list 应答。传 since 时只返回
+   * updatedAt 晚于该时间线的会话（手机增量轮询）。列表投影不携带 state
+   * （含聊天记录全文）——记录由手机进入详情后经 session.messages 按游标增量读取。
+   */
+  list(since?: string): Array<Record<string, unknown>> {
     const aliasedHeadlessIds = new Set(
       [...this.sessions.values()]
         .map(session => session.state?.headlessSessionId)
@@ -747,14 +789,47 @@ export class SessionIndex {
     )
     return [...this.sessions.values()]
       .filter(session => !aliasedHeadlessIds.has(session.sessionId))
+      .filter(session => since === undefined || since === '' || session.updatedAt > since)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map(s => ({ ...s }))
+      .map((s) => {
+        const projection: Record<string, unknown> = { ...s }
+        delete projection.state
+        return projection
+      })
   }
 
   /** 会话详情，供 session.detail 应答。 */
   get(sessionId: string): Record<string, unknown> | undefined {
     const s = this.sessions.get(sessionId)
     return s === undefined ? undefined : { ...s }
+  }
+
+  /** 按 PC history 序号返回增量消息；序号从 1 开始，afterSeq 表示已消费前缀长度。 */
+  messages(sessionId: string, afterSeq: number): Record<string, unknown> | undefined {
+    const session = this.sessions.get(sessionId)
+    if (session === undefined) return undefined
+    const history = Array.isArray(session.state?.history)
+      ? session.state.history.filter((item): item is { role: 'user' | 'assistant'; text: string } => (
+        typeof item === 'object' && item !== null
+          && ((item as { role?: unknown }).role === 'user' || (item as { role?: unknown }).role === 'assistant')
+          && typeof (item as { text?: unknown }).text === 'string'
+      ))
+      : []
+    const offset = Math.min(history.length, Math.max(0, Number.isFinite(afterSeq) ? Math.floor(afterSeq) : 0))
+    // 前缀指纹：客户端比对「已消费前缀末位」是否仍是服务端同一条消息。派生历史在
+    // 已确认前缀中间插入轮次（如 PC web 直发后下一次远程回合终态覆写）时序号会整体
+    // 后移，指纹失配即触发客户端全量重建（游标自愈通道），避免旧序号残留重复渲染。
+    const prefixItem = offset > 0 && history.length >= offset ? history[offset - 1] : undefined
+    return {
+      sessionId,
+      phase: session.phase,
+      updatedAt: session.updatedAt,
+      nextSeq: history.length,
+      ...(prefixItem === undefined
+        ? {}
+        : { prefix: { role: prefixItem.role, len: prefixItem.text.length, head: prefixItem.text.slice(0, 40) } }),
+      messages: history.slice(offset).map((message, index) => ({ ...message, seq: offset + index + 1 })),
+    }
   }
 
   /**
@@ -769,22 +844,32 @@ export class SessionIndex {
     parentSessionId?: string
     headlessSessionId?: string
     workspace?: { workspaceId: string; title: string }
+    /** PC agent 会话派生的完整轮次（含 web 直发轮）：非空时作为权威历史取代旧累计。 */
+    derivedHistory?: Array<{ role: 'user' | 'assistant'; text: string }>
   }): void {
     const now = new Date().toISOString()
     const prev = this.sessions.get(info.sessionId)
+    const validHistoryEntry = (item: unknown): item is { role: 'user' | 'assistant'; text: string } => (
+      typeof item === 'object' && item !== null
+        && ((item as { role?: unknown }).role === 'user' || (item as { role?: unknown }).role === 'assistant')
+        && typeof (item as { text?: unknown }).text === 'string'
+    )
     const previousHistory = Array.isArray(prev?.state?.history)
-      ? prev.state.history.filter((item): item is { role: 'user' | 'assistant'; text: string } => (
-        typeof item === 'object' && item !== null
-          && ((item as { role?: unknown }).role === 'user' || (item as { role?: unknown }).role === 'assistant')
-          && typeof (item as { text?: unknown }).text === 'string'
-      ))
+      ? prev.state.history.filter(validHistoryEntry)
       : []
-    const history = [...previousHistory]
+    // live agent 的完整对话（含 PC web 直发轮次）是权威历史：非空时取代旧累计，
+    // 手机游标按该序列增量消费——PC 插入的轮次随下一次远程回合终态进入增量流。
+    const history = [...(info.derivedHistory !== undefined && info.derivedHistory.length > 0
+      ? info.derivedHistory.filter(validHistoryEntry)
+      : previousHistory)]
     const workspace = info.workspace ?? prev?.workspace
-    if (history.at(-1)?.role !== 'user' || history.at(-1)?.text !== info.prompt) {
+    let lastUserIndex = history.map(item => item.role).lastIndexOf('user')
+    const lastUser = lastUserIndex >= 0 ? history[lastUserIndex] : undefined
+    if (lastUser === undefined || lastUser.text !== info.prompt) {
       history.push({ role: 'user', text: info.prompt })
+      lastUserIndex = history.length - 1
     }
-    if (info.result !== undefined && (history.at(-1)?.role !== 'assistant' || history.at(-1)?.text !== info.result)) {
+    if (info.result !== undefined && !history.slice(lastUserIndex + 1).some(item => item.role === 'assistant')) {
       history.push({ role: 'assistant', text: info.result })
     }
     this.sessions.set(info.sessionId, {
