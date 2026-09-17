@@ -355,7 +355,10 @@ export class KestraSessionSyncClient {
             const data = event.data
             if (data === undefined) continue
             if (type === 'session.input') {
-              await handler({
+              // 指令执行可能持续数分钟，不能阻塞 SSE 读取循环；否则 heartbeat
+              // 无法被消费，45s idle guard 会把仍健康的 PC 误判为离线。handler
+              // 自身通过 mountClient 的 chain 保证串行执行，这里只负责持续收流。
+              void Promise.resolve(handler({
                 sessionId: String(data.sessionId ?? ''),
                 text: String(data.text ?? ''),
                 newSession: data.newSession === true,
@@ -363,6 +366,8 @@ export class KestraSessionSyncClient {
                   ? {}
                   : { workspaceId: String(data.workspaceId) }),
                 at: new Date().toISOString(),
+              })).catch((error) => {
+                process.stderr.write(`[kestra-sync] session.input handler failed: ${String(error)}\n`)
               })
             } else if (type === 'session.approval.decision') {
               await approvalHandler?.({
