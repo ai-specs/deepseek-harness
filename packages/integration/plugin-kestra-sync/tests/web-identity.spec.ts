@@ -48,4 +48,32 @@ describe('kestra-sync auth=web-identity', () => {
     expect(() => new KestraSessionSyncClient({ baseUrl: 'http://k.test', auth: 'web-identity' }))
       .toThrow(/webIdentity/u)
   })
+
+  it('aborts the active relay stream immediately when the PC identity logs out', async () => {
+    let identityListener: ((sub: string | undefined) => void) | undefined
+    let requestSignal: AbortSignal | undefined
+    const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined
+      return new Response(new ReadableStream<Uint8Array>({ start() {} }), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    })
+    const client = new KestraSessionSyncClient(
+      { baseUrl: 'http://k.test', auth: 'web-identity' },
+      fetchImpl as unknown as typeof fetch,
+      undefined,
+      {
+        ensureAccessToken: async () => 'web-at',
+        currentSub: () => 'alice@kestra.io',
+        onChange: (listener) => { identityListener = listener; return () => { identityListener = undefined } },
+      },
+    )
+
+    const stop = client.startInputSse(() => {})
+    await vi.waitFor(() => { expect(requestSignal).toBeDefined() })
+    identityListener?.(undefined)
+    expect(requestSignal?.aborted).toBe(true)
+    stop()
+  })
 })

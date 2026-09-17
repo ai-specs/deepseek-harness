@@ -21,6 +21,8 @@ export interface WebIdentityHandle {
   ensureAccessToken(): Promise<string | undefined>
   /** 当前登录用户 OIDC sub；未加载/未登录时 undefined。 */
   currentSub(): string | undefined
+  /** 登录身份变化时通知消费者；用于立即断开旧用户 SSE 并为新用户重连。 */
+  onChange?(listener: (sub: string | undefined) => void): () => void
 }
 
 export interface KestraSyncConfig {
@@ -241,6 +243,8 @@ export class KestraSessionSyncClient {
 
   private inputSseAbort: AbortController | undefined
   private inputSseReading = false
+  private inputIdentityUnsubscribe: (() => void) | undefined
+  private inputSseWake: (() => void) | undefined
 
   /**
    * 选项 B 指令接收主链路：SSE 订阅中台 relay/events（GET /api/v1/dsh/relay/events），
@@ -262,7 +266,23 @@ export class KestraSessionSyncClient {
     if (this.inputSseReading) return () => this.stopInputSse()
     this.inputSseReading = true
     const base = this.config.baseUrl.replace(/\/+$/, '')
-    const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+    const sleep = (ms: number): Promise<void> => new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.inputSseWake = undefined
+        resolve()
+      }, ms)
+      this.inputSseWake = () => {
+        clearTimeout(timer)
+        this.inputSseWake = undefined
+        resolve()
+      }
+    })
+    this.inputIdentityUnsubscribe ??= this.webIdentity?.onChange?.(() => {
+      // Logout must make the relay presence disappear immediately; login/user switch
+      // must not wait for an exponential-backoff timer before attaching the new sub.
+      this.inputSseAbort?.abort()
+      this.inputSseWake?.()
+    })
 
     void (async () => {
       let backoffMs = 1_000
@@ -314,6 +334,9 @@ export class KestraSessionSyncClient {
   private stopInputSse(): void {
     this.inputSseReading = false
     this.inputSseAbort?.abort()
+    this.inputSseWake?.()
+    this.inputIdentityUnsubscribe?.()
+    this.inputIdentityUnsubscribe = undefined
   }
 
   /** SSE 流解析（`\n\n` 分帧、`data:` 行 JSON），按 §5.3 事件表分发。 */

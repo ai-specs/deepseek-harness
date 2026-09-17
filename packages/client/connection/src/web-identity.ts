@@ -56,6 +56,7 @@ export class WebIdentityService extends Service {
   private payload: WebIdentityPayload | undefined
   private loaded = false
   private inflight: Promise<string | undefined> | undefined
+  private readonly listeners = new Set<(sub: string | undefined) => void>()
 
   constructor(ctx: Context, private readonly refreshEndpoint: { url: string; clientId: string }) {
     super(ctx, 'webIdentity')
@@ -85,17 +86,33 @@ export class WebIdentityService extends Service {
     return this.payload?.sub
   }
 
+  /** Observe login/logout identity transitions (tokens refreshed for the same sub are ignored). */
+  onChange(listener: (sub: string | undefined) => void): () => void {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+
+  private notifyIfChanged(previousSub: string | undefined): void {
+    const nextSub = this.payload?.sub
+    if (nextSub === previousSub) return
+    for (const listener of this.listeners) listener(nextSub)
+  }
+
   /** Persist the tokens minted by a completed browser sign-in. */
   async save(payload: WebIdentityPayload): Promise<void> {
+    const previousSub = this.payload?.sub
     this.payload = payload
     await this.ctx.credentials.modifyRecord(WEB_IDENTITY_KEY, () =>
       Promise.resolve<CredentialRecord | undefined>({ kind: 'grant', payload }))
+    this.notifyIfChanged(previousSub)
   }
 
   /** Drop the identity (logout, or a broken refresh chain). */
   async clear(): Promise<void> {
+    const previousSub = this.payload?.sub
     this.payload = undefined
     await this.ctx.credentials.deleteRecord(WEB_IDENTITY_KEY)
+    this.notifyIfChanged(previousSub)
   }
 
   /**

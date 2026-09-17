@@ -50,6 +50,35 @@ function idToken(sub: string): string {
 }
 
 describe('WebIdentityService', () => {
+  it('notifies consumers when the signed-in sub changes or logs out', async () => {
+    const service = identity(new RecordCredentials())
+    const changes: Array<string | undefined> = []
+    const off = service.onChange(sub => changes.push(sub))
+    await service.save({
+      version: 1,
+      sub: 'alice@kestra.io',
+      accessToken: 'at-1',
+      refreshToken: 'rt-1',
+      expiresAt: Date.now() + 3_600_000,
+    })
+    await service.save({
+      version: 1,
+      sub: 'alice@kestra.io',
+      accessToken: 'at-2',
+      refreshToken: 'rt-2',
+      expiresAt: Date.now() + 3_600_000,
+    })
+    await service.clear()
+    off()
+    await service.save({
+      version: 1,
+      sub: 'bob@kestra.io',
+      accessToken: 'at-3',
+      expiresAt: Date.now() + 3_600_000,
+    })
+    expect(changes).toEqual(['alice@kestra.io', undefined])
+  })
+
   it('starts empty, saves a sign-in durably, and reloads it next activation', async () => {
     const store = new RecordCredentials()
     const first = identity(store)
