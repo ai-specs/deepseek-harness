@@ -759,9 +759,23 @@ export class SessionIndex {
     if (sessionId === undefined) return
     const events = session.events ?? session.snapshotEvents?.() ?? []
     const phase = deriveSessionPhaseFromLog(events) ?? 'running'
-    const state = { source: 'dsh-pc-web', ...foldSyncState(session.deriveMessages?.() ?? []) }
-    const now = new Date().toISOString()
+    const derived = session.deriveMessages?.() ?? []
     const prev = this.sessions.get(sessionId)
+    // 消息轮次的权威投影：与 record（headless 终态）共用 deriveHistory，保证
+    // PC web 直发会话（upsert 路径）的 state.history 也被投影——手机端
+    // session.messages 只读 state.history，此前 upsert 仅折叠 prompt/result、
+    // 不写 history，导致 web 直发会话详情永远返回空。观测窗口消息未就绪时
+    // 保留既有 history，避免事件顺序抖动把已确认历史清空。
+    const projected = deriveHistory(derived)
+    const history = projected.length > 0
+      ? projected
+      : (Array.isArray(prev?.state?.history) ? prev.state.history : undefined)
+    const state = {
+      source: 'dsh-pc-web',
+      ...foldSyncState(derived),
+      ...(history === undefined ? {} : { history }),
+    }
+    const now = new Date().toISOString()
     this.sessions.set(sessionId, {
       sessionId,
       phase,
