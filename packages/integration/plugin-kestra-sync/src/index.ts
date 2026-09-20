@@ -489,6 +489,8 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       whenIdle(): Promise<void>
       session: {
         deriveMessages(): ReadonlyArray<{ role: string; content: unknown }>
+        // 事件快照（session/title 等）——运行时 API 存在，类型对齐 core.ts 契约。
+        snapshotEvents?(): ReadonlyArray<{ type: string; data?: unknown }>
       }
     }
     const host = ctx as Context & {
@@ -546,6 +548,8 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       const derived = agent.session.deriveMessages()
       const result = foldSyncState(derived).result ?? ''
       const agentEvents = agent.session.snapshotEvents?.() ?? []
+      // 会话标题以 PC 端为准：LLM 生成标题（provider）则镜像为 title。
+      const providerTitle = deriveTitleFromLog(agentEvents)
       index.record({
         sessionId: input.sessionId ?? headlessSessionId,
         phase: 'completed',
@@ -554,8 +558,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
         headlessSessionId,
         // 完整轮次（含 PC web 直发轮）作为权威历史：手机游标增量内可见 PC 插入的消息。
         derivedHistory: deriveHistory(derived),
-        // 会话标题以 PC 端为准：LLM 生成标题（provider）则镜像为 summary。
-        ...(deriveTitleFromLog(agentEvents) === undefined ? {} : { title: deriveTitleFromLog(agentEvents) }),
+        ...(providerTitle === undefined ? {} : { title: providerTitle }),
       })
       void client.reportMetric({
         type: 'session_end',
