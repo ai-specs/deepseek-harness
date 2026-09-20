@@ -22,7 +22,7 @@ describe('SessionIndex 持久化（PC 重启恢复）', () => {
     const detail = b.get('h-1')
     expect(detail).toBeDefined()
     expect(detail?.phase).toBe('completed')
-    expect(detail?.summary).toContain('帮我查订单')
+    expect(detail?.title).toContain('帮我查订单')
     expect((detail?.state as Record<string, unknown>)?.result).toBe('订单已查')
     b.dispose()
     rmSync(dirnameOf(file), { recursive: true, force: true })
@@ -70,7 +70,7 @@ describe('SessionIndex 持久化（PC 重启恢复）', () => {
     a.record({ sessionId: 'phone-1', phase: 'completed', prompt: '追问', result: '追答', headlessSessionId: 'headless-1' })
 
     expect(a.list().map(session => session.sessionId)).toEqual(['phone-1'])
-    expect(a.get('phone-1')?.summary).toBe('首问')
+    expect(a.get('phone-1')?.title).toBe('首问')
     expect((a.get('phone-1')?.state as Record<string, unknown>).prompt).toBe('追问')
     expect((a.get('phone-1')?.state as Record<string, unknown>).history).toEqual([
       { role: 'user', text: '首问' },

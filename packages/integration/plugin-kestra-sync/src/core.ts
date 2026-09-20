@@ -669,7 +669,8 @@ export function wireSessionId(localId: string): string | undefined {
 /** 从事件日志取 PC 端最终会话标题（手机端以 PC 端为准，严格镜像其显示）：
  * 从后往前找最后一条 session/title——仅当 source.kind==='provider'（LLM 生成）
  * 才返回标题；fallback 标题就是首条用户消息（prompt），无增量信息，此时返回
- * undefined 让手机端继续用 summary（prompt），与 PC 端 fallback 显示一致。 */
+ * undefined 让手机端继续用 title 回退 prompt（fallback 标题即 prompt），
+ * 与 PC 端 fallback 显示一致。 */
 export function deriveTitleFromLog(
   events: ReadonlyArray<{ type: string; data?: unknown }>,
 ): string | undefined {
@@ -804,9 +805,9 @@ export class SessionIndex {
       pendingInput: false,
       createdAt: prev?.createdAt ?? now,
       updatedAt: now,
-      // 会话标题以 PC 端为准：PC 有 LLM 生成标题（provider）则镜像为 summary，
+      // 会话标题以 PC 端为准：PC 有 LLM 生成标题（provider）则镜像为 title，
       // 否则保持 prompt（fallback 标题即首条用户消息，无增量信息）。
-      summary: deriveTitleFromLog(events) ?? String(state.prompt ?? '（无摘要）').slice(0, 90),
+      title: deriveTitleFromLog(events) ?? String(state.prompt ?? '（无摘要）').slice(0, 90),
       ...(workspace === undefined ? {} : { workspace }),
       state,
     })
@@ -884,7 +885,7 @@ export class SessionIndex {
     workspace?: { workspaceId: string; title: string }
     /** PC agent 会话派生的完整轮次（含 web 直发轮）：非空时作为权威历史取代旧累计。 */
     derivedHistory?: Array<{ role: 'user' | 'assistant'; text: string }>
-    /** PC 端最终标题（LLM provider 生成，事件日志推导）：有则镜像为 summary。 */
+    /** PC 端最终标题（LLM provider 生成，事件日志推导）：有则镜像为 title。 */
     title?: string
   }): void {
     const now = new Date().toISOString()
@@ -918,7 +919,7 @@ export class SessionIndex {
       pendingInput: false,
       createdAt: prev?.createdAt ?? now,
       updatedAt: now,
-      summary: info.title ?? prev?.summary ?? String(info.prompt ?? '（无摘要）').slice(0, 90),
+      title: info.title ?? prev?.title ?? String(info.prompt ?? '（无摘要）').slice(0, 90),
       ...(workspace === undefined ? {} : { workspace }),
       state: {
         source: 'dsh-pc-web',
@@ -940,7 +941,7 @@ interface IndexedSession {
   pendingInput: boolean
   createdAt: string
   updatedAt: string
-  summary: string
+  title: string
   workspace?: { workspaceId: string; title: string }
   state: Record<string, unknown>
 }
