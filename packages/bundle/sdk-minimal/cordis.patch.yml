@@ -27,6 +27,10 @@
       name: '@deepseek-ai/dsh-llm-deepseek'
       config:
         apiKeyEnv: DEEPSEEK_API_KEY
+        # dsh fork 定制：DashScope compatible-mode（OpenAI 风格 chat-completions，
+        # 见 .env DEEPSEEK_BASE_URL）。此 profile 不 layer dsh-base，须在此显式
+        # 钉死协议，否则 messages 协议会连真实 MESSAGES_BASE_URL 并 401。
+        protocol: chat-completions
         defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
         streamIdleTimeoutMs: 172800000
 

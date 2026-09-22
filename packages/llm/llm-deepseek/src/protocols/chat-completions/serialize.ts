@@ -248,6 +248,18 @@ export function serializeMessages(messages: readonly RequestMessage[]): WireMess
       wire.push(serializeAssistant(message))
       continue
     }
+    // First-class tool messages (upstream session vocabulary after the
+    // 0.1.7 merge): project them to DeepSeek role:'tool' wire messages with
+    // the provider-issued call id instead of flattening them into a user turn.
+    if (message.role === 'tool') {
+      wire.push({
+        role: 'tool',
+        tool_call_id: message.toolCallId,
+        // Empty tool output still needs SOME content on the wire.
+        content: flattenText(message.content) || '(no output)',
+      })
+      continue
+    }
     // user role: tool results ride in user messages in the harness
     // vocabulary, but DeepSeek wants them as role:'tool' messages.
     const toolResults = message.content.filter(block => block.type === 'tool-result')
@@ -301,6 +313,18 @@ export async function serializeMessagesWithImages(
     if (message.role === 'assistant') {
       flushToolImages()
       wire.push(serializeAssistant(message))
+      continue
+    }
+    // First-class tool messages (upstream session vocabulary): text-only tool
+    // results map directly to wire role:'tool'; image-carrying tool results
+    // are handled by assertSupportedImageRoles above (rejected until the
+    // image projection path gains a first-class tool-role branch).
+    if (message.role === 'tool') {
+      wire.push({
+        role: 'tool',
+        tool_call_id: message.toolCallId,
+        content: flattenText(message.content) || '(no output)',
+      })
       continue
     }
 

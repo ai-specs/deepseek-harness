@@ -955,10 +955,23 @@ def smoke_sdk_authoring(base_url: str, executable: Path, update_snapshots: bool)
             for name in ("office-docx", "office-pptx", "office-xlsx"):
                 assert (name in prompt) == (mode != "disabled"), (mode, name)
             assert ("CUSTOM_OFFICE_DOCX" in prompt) == (mode == "replacement"), mode
-            tool_result = next(block for message in requests[1]["messages"]
-                               for block in message.get("content", [])
-                               if isinstance(block, dict) and block.get("tool_use_id") == "authoring-runtime")
-            dependencies = json.loads(message_text(tool_result["content"]))
+            # 0.1.7 upstream session vocabulary carries tool results as first-class
+            # role:'tool' messages; fall back to the legacy tool_result block shape.
+            tool_message = next(
+                (message for message in requests[1]["messages"]
+                 if message.get("role") == "tool" and message.get("tool_call_id") == "authoring-runtime"),
+                None,
+            )
+            tool_result = tool_message or next(
+                (block for message in requests[1]["messages"]
+                 for block in message.get("content", [])
+                 if isinstance(block, dict) and block.get("tool_use_id") == "authoring-runtime"),
+                None,
+            )
+            if tool_result is None:
+                raise AssertionError(f"authoring-runtime tool result missing from {requests[1]}")
+            tool_content = tool_result["content"] if isinstance(tool_result["content"], str) else tool_result["content"]
+            dependencies = json.loads(tool_content if isinstance(tool_content, str) else message_text(tool_content))
             python = Path(dependencies["python"])
             assert python.is_relative_to(resources), dependencies
             assert "node" not in dependencies and "pnpm" not in dependencies, dependencies
@@ -972,7 +985,11 @@ def smoke_sdk_authoring(base_url: str, executable: Path, update_snapshots: bool)
                 ], check=True, timeout=120,
                     env={name: value for name, value in os.environ.items()
                          if not re.search(r"KEY|SECRET|TOKEN|PASSWORD", name, re.I)})
-                schema = next(tool for tool in requests[0]["tools"] if tool.get("name") == "load_workspace_dependencies")
+                schema = next(
+                    tool for tool in requests[0]["tools"]
+                    if tool.get("name") == "load_workspace_dependencies"
+                    or (tool.get("function") or {}).get("name") == "load_workspace_dependencies"
+                )
                 visible = {"tool": schema, "result": {**dependencies, "python": "{{python}}", "pythonPackages": "{{site-packages}}"}}
                 compare_snapshot_files(
                     {"model-visible.json": json.dumps(visible, indent=2, ensure_ascii=False) + "\n"},
@@ -1298,9 +1315,15 @@ def smoke_sdk_minimal(
         if in_history:
             patch = root / "in-history.patch.yml"
             patch.write_text(json.dumps([
-                {"id": "llm-deepseek", "config": {"models": [
-                    {"id": "smoke-model", "systemPromptUpdate": "in-history"},
-                ]}},
+                {"id": "llm-deepseek", "config": {
+                    # Patch replaces the plugin config surface, so the fork's
+                    # protocol pin must be restated here (DashScope
+                    # compatible-mode chat-completions).
+                    "protocol": "chat-completions",
+                    "models": [
+                        {"id": "smoke-model", "systemPromptUpdate": "in-history"},
+                    ],
+                }},
                 {"insert": [{
                     "id": "in-history-prompt",
                     "name": (Path(__file__).resolve().parent / "fixtures/python-sdk-in-history-prompt.mjs").as_uri(),
