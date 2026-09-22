@@ -27,7 +27,7 @@ The Web boot kernel creates the module system, prefetches `immediately` entries,
 
 Host business services annotate callable methods with Typert Remote decorators. Host generation emits strict descriptors, runtime codecs, declaration merges, and source maps. The Client-side `api-remotes` assembly selects those generated contributions and mounts concrete methods under `ctx.remote.<namespace>` and Session-scoped `agentCtx.remote.<namespace>`. Feature packages depend on the generated service face, not the Gateway implementation or a Host package's runtime entry.
 
-The Connection owns request correlation, the `/api` carrier, trust checks, exact Fetch routes, and connection generations. API Gateway owns Remote dispatch, cancellation, logical streams, and selected Host event forwarding. Controller operations belong on generated Remote methods or explicit Remote streams; feature-owned downloads register exact Fetch routes. The [API Gateway reference](../api-gateway.md) defines generation and invocation, while the [Connection README](../../packages/client/connection/README.md) defines the physical carrier and trust policy.
+The Connection owns request URL resolution, correlation, the `/api` carrier, trust checks, exact Fetch routes, and connection generations. API Gateway owns Remote dispatch, cancellation, logical streams, and selected Host event forwarding. Controller operations belong on generated Remote methods or explicit Remote streams; feature-owned downloads register exact Fetch routes. The [API Gateway reference](../api-gateway.md) defines generation and invocation, while the [Connection README](../../packages/client/connection/README.md) defines the physical carrier and trust policy.
 
 The internal `$events` logical stream is the Connection generation source. Its opening `ready` frame carries the Host home used for path display and establishes the generation after Host listeners are attached, before any controller begins a baseline read. `ctx.remote.$on()` delivers allowlisted ordinary events to the root Client Context and scoped waterfall events to the resolved Session Context; a waterfall listener returns a result, calls `next()`, or rejects.
 
@@ -40,18 +40,20 @@ Each API controller package owns a paired Host and Client face. The Host side ow
 [`api/session-controller`](../../packages/api/session-controller/README.md) exposes Host commands for list, search, creation, prompt, queue, cancellation, pagination, and follow/control streams. Its Client side is organized as `ClientSessions → SessionManager → Session`:
 
 - `ClientSessions` provides `ctx.sessions`, owns references, source counts, Session scopes, and stable `SessionBinding` objects, and projects catalog state without selecting a global current Session.
-- `SessionManager` owns the list baseline, live list/control updates, lazy Session instances, queues, projection stores, subagent catalogs, and conflict ordering between pulls and later updates.
+- `SessionManager` owns the list baseline, live list/control updates, lazy Session instances, projection stores, subagent catalogs, and conflict ordering between pulls and later updates.
 - Each `Session` owns one contiguous logical-event window represented by `SessionEventLikeEntry` values, paging, follow, prompt/control state, and the observable snapshot consumed by adapters.
 
-The durable event path opens `follow()`, whose first frame contains the current header, tail page, cursor, and complete projection baseline. History records have an explicit `event` or `chunks` discriminator and an aligned inner `event`; the journal validates each inclusive logical sequence range before the Client retains the records as `SessionEventLikeEntry` values without per-record conversion. Each physical generation atomically replaces the retained window from that snapshot; standard live events then append by sequence. `page()` is reserved for older history and gap repair. The transient control stream starts every generation with a complete baseline and then applies queue, job, and projection updates.
+The durable event path opens `follow()`, whose first frame contains the current header, tail page, cursor, and complete projection baseline. History records have an explicit `event` or `chunks` discriminator and an aligned inner `event`; the journal validates each inclusive logical sequence range before the Client retains the records as `SessionEventLikeEntry` values without per-record conversion. Each physical generation atomically replaces the retained window from that snapshot; standard live events then append by sequence. `page()` is reserved for older history and gap repair. The transient control stream starts every generation with a complete baseline and then applies projection updates.
 
 ### Workspaces
 
-[`api/workspace-controller`](../../packages/api/workspace-controller/README.md) keeps Workspace mutation policy and the authoritative follow feed on the Host. `ClientWorkspaceModel` owns the browser rows, order, archived Session ids, command echoes, and stream/unary race resolution. Every stream generation starts with a complete baseline followed by `upsert`, `remove`, `order`, and `archived` increments; reconnect replaces the model from the new baseline. `WorkspaceController` exposes that model as `ctx.workspaces`, while `ui-workspace` contributes `useWorkspaces` and navigation callbacks to the UI. The archived Session ids filter every grouping surface and feed the archived-sessions Settings page, which joins the set with the loaded Session summaries and offers one Unarchive action per row; a restore calls the `workspace.unarchiveSession` Remote, and the complete returned set reaches every Client through the `archived` increment.
+[`api/workspace-controller`](../../packages/api/workspace-controller/README.md) keeps Workspace mutation policy and the authoritative follow feed on the Host. `ClientWorkspaceModel` owns browser rows, Workspace order, archived and pinned Session id arrays, command echoes, and stream/unary race resolution. Every stream generation starts with a complete baseline followed by `upsert`, `remove`, `order`, `archived`, and `pinned` increments; reconnect replaces the model from the new baseline. `WorkspaceController` exposes that model as `ctx.workspaces`, while `ui-workspace` contributes `useWorkspaces` and navigation callbacks. The sidebar's `ArchivedFilter` controls default-hidden, shown, or archived-only rows in lists and search. Archived rows retain their ordering slots, render grayed, and cannot open until restored through the row or search-result Unarchive action. Restoration calls `workspace.unarchiveSession`, and its complete archive set reaches Clients through the unary response and `archived` increment. Session display order stays browser-local and includes hidden archives; pinning moves a Session within that full order, while unpinning does not restore its earlier position.
 
 This pairing is not a second source of business truth. Host controllers decide durable state and mutation outcomes; Client models maintain the latest usable local projection, preserve object identity where useful to rendering, and encode how delayed responses and replacement baselines merge.
 
 ## Conversation and presentation
+
+Web and desktop share the [developer-tool preference](../../packages/client/ui-settings/README.md#use-this-package). It controls diagnostic Views, new-session preset selection, changed-file cards, and the builtin HTML preview policy without changing Session records.
 
 `ui-session` installs the Session scope adapter and publishes `useSessions`, `useSessionStatus`, `useSessionRetainInfo`, `useSession`, `sessionId`, and `useProjection`. `SessionProvider` inherits an outer binding or binds an explicit `SessionReference`, so concurrent subtrees can target different Sessions. Domain adapters add further standard sources without putting React hooks on the model objects.
 
@@ -64,7 +66,8 @@ This pairing is not a second source of business truth. Host controllers decide d
 | Path | Sequence |
 |---|---|
 | durable Session display | Host Session log → packed Remote `follow`/`page` history → Client `SessionEventLikeEntry` window → Conversation Contexts → target snapshot (`chat`, `trajectory`, or another registered target) → Slot view → React |
-| transient Session control | Host control baseline → Remote snapshot stream → `SessionManager` queue/job/projection stores → Session and list snapshots → standard hooks → components |
+| transient Session control | Host control baseline → Remote snapshot stream → `SessionManager` projection stores → Session and list snapshots → standard hooks → components |
+| Background jobs | Host job registry → `job.list` / `job.follow` → [`ClientJobs`](../../packages/api/job-controller/README.md) roster and output views → job list and panels |
 | Workspace state | Host Workspace baseline and increments → `ClientWorkspaceModel` → `ctx.workspaces.list` → `useWorkspaces` → sidebar, hero, and navigation entries |
 | scoped interaction | Host Cordis waterfall → API Remotes `$events` → `ctx.remote.$on()` on the Session Context → owning UI package → result or `next()` |
 | user command | component callback → registration inject face or Slot owner → `ctx.sessions`, `ctx.workspaces`, or generated scoped Remote → Host Controller → authoritative update → stream or event projection back to the Client |
@@ -93,3 +96,41 @@ Use the four detailed references according to the extension being added:
 - [API Gateway](../api-gateway.md) for Host methods, generated Remote contributions, streams, and forwarded events.
 - [Web Client Slots](slots.md) for components, hooks, stores, injection, and placement.
 - [Conversation](conversation.md) for durable event correlation, target snapshots, and Chat or Trajectory view contributions.
+
+<!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
+
+<a id="cordis-surface"></a>
+
+## Cordis API
+
+Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxwebidentity--webidentityhandle"></a>
+
+### `ctx.webIdentity` — `WebIdentityHandle`
+
+web 进程留存的用户身份（A10 ②）：结构化句柄，避免 integration 包反向依赖 client-connection。
+
+```ts cordis-catalog
+/**
+ * 可用 access token（自动续期）；未登录/链断时 undefined。
+ * @returns 当前可用的 access token；未登录或链路断开时为 undefined。
+ */
+ensureAccessToken(): Promise<string | undefined>
+
+/**
+ * 当前登录用户 OIDC sub；未加载/未登录时 undefined。
+ * @returns 当前登录用户的 OIDC sub；未加载或未登录时为 undefined。
+ */
+currentSub(): string | undefined
+
+/**
+ * 登录身份变化时通知消费者；用于立即断开旧用户 SSE 并为新用户重连。
+ * @param listener 身份变化回调，参数为新的 OIDC sub（登出时为 undefined）。
+ * @returns 注销订阅的清理函数。
+ */
+onChange?(listener: (sub: string | undefined) => void): () => void
+```
+
+Source: [`packages/integration/plugin-kestra-sync/src/core.ts`](../../packages/integration/plugin-kestra-sync/src/core.ts)
+<!-- END GENERATED cordis-surface -->

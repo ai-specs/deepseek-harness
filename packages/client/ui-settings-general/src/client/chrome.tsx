@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'react'
 import clsx from 'clsx'
-import { IconSettingsOutline14, IconSettingsOutline16, IconUserOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconSettingsOutlineRegular, IconSettingsOutlineMedium, IconUserOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './chrome.module.css'
 
@@ -67,7 +67,7 @@ export function UserTrigger({ wide, t, onOpen }: UserTriggerProps) {
       title={`${t('user.identity')} ${sub}`}
       onClick={onOpen}
     >
-      <IconUserOutline16 size={wide ? 16 : 18} />
+      <IconUserOutlineMedium size={wide ? 16 : 18} />
       {wide && <span className={css.userLabel}>{sub}</span>}
     </button>
   )
@@ -81,7 +81,7 @@ export function UserTrigger({ wide, t, onOpen }: UserTriggerProps) {
 export function TriggerContent({ wide, t }: TriggerContentProps) {
   return (
     <>
-      {wide ? <IconSettingsOutline16 size={16} /> : <IconSettingsOutline14 size={18} />}
+      {wide ? <IconSettingsOutlineMedium size={16} /> : <IconSettingsOutlineRegular size={18} />}
       {wide && <span className={css.triggerLabel}>{t('trigger')}</span>}
     </>
   )

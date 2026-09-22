@@ -99,8 +99,11 @@ export function serialize(
       return [{ type: 'tool_result', tool_use_id: block.toolCallId, content: input(block.content), ...block.isError === undefined ? {} : { is_error: block.isError } }]
     })
     const previous = messages.at(-1)
-    if (previous?.role === message.role) previous.content.push(...content)
-    else messages.push({ role: message.role, content })
+    // DeepSeek's Messages API has no developer role; developer snapshots are
+    // system prompts in this fork's wire vocabulary.
+    const role = message.role === 'developer' ? 'system' : message.role
+    if (previous?.role === role) previous.content.push(...content)
+    else messages.push({ role, content })
   }
   flushSystemUpdates()
   let pending = new Set<string>()

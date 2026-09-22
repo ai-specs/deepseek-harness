@@ -1,4 +1,11 @@
+---
+description: "Session-sync client pushing dsh(PC) session snapshots to Kestra: outbound-only, event-triggered, with realtime/batch modes."
+kind: "package-bundle"
+---
+
 # @deepseek-ai/dsh-plugin-kestra-sync
+
+## Summary
 
 dsh-kestra-sync：会话同步客户端（dsh.docx 拓扑中的 `dsh(PC) ←会话同步→ Kestra`）。
 
@@ -6,7 +13,24 @@ dsh-kestra-sync：会话同步客户端（dsh.docx 拓扑中的 `dsh(PC) ←会�
 - 触发时机：会话开始 / 每完成一个子任务 / 高风险决策点（pending_approval）/ 会话结束
 - 推送内容：sessionId、phase（running/pending_approval/completed/failed）、历史摘要、工具调用记录、Token 消耗、耗时
 
-## 配置
+## Table of Contents
+
+- [Summary](#summary)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Dev Note](#dev-note)
+
+## Dev Note
+
+- Tests live in `tests/`; keep the plugin outbound-only and dependency-free at runtime.
+
+
+dsh-kestra-sync：会话同步客户端（dsh.docx 拓扑中的 `dsh(PC) ←会话同步→ Kestra`）。
+
+- dsh(PC) 无公网 IP，本插件**只主动外连** Kestra API，不监听任何端口
+- 触发时机：会话开始 / 每完成一个子任务 / 高风险决策点（pending_approval）/ 会话结束
+- 推送内容：sessionId、phase（running/pending_approval/completed/failed）、历史摘要、工具调用记录、Token 消耗、耗时
+
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
@@ -17,7 +41,6 @@ dsh-kestra-sync：会话同步客户端（dsh.docx 拓扑中的 `dsh(PC) ←会�
 | batchIntervalMs | `2000` | 批量刷新间隔 |
 | timeoutMs | `5000` | 单次推送超时 |
 
-## 用法
 
 ```ts
 import { KestraSessionSyncClient } from '@deepseek-ai/dsh-plugin-kestra-sync/core'

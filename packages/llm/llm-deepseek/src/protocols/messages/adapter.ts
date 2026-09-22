@@ -1,7 +1,7 @@
 /** Direct Messages transport with one cancellable lifecycle per model request. */
 
 import { attributionHeaders, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, ImageAttachmentAccessResolver, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, ImageAttachmentAccessResolver, Message, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { DeepSeekLlmApiJson } from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
@@ -89,8 +89,10 @@ export class DeepSeekMessagesAdapter extends LlmAdapter {
     options: GenerateOptions, connection: Connection, signal: AbortSignal, activity: () => void,
   ): AsyncGenerator<StreamChunk> {
     signal.throwIfAborted()
+    // RequestUserInput (single-shot identity-free user turn) is structurally a
+    // user Message; the serializer consumes it exactly like a durable user turn.
     const { messages, versions } = await prepareImages(
-      options.messages, connection, options.model, this.dependencies.attachments(), this.dependencies.imageAccess, signal,
+      options.messages as readonly Message[], connection, options.model, this.dependencies.attachments(), this.dependencies.imageAccess, signal,
     )
     const key = await this.dependencies.apiKey(connection)
     const files = new RequestFiles(this.dependencies.files(), { baseURL: connection.baseURL, apiKey: key, protocol: 'messages' },

@@ -17,10 +17,11 @@ import type { Message } from '@deepseek-ai/dsh-llm'
 import * as PluginPackageInventoryDeepSeek from '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import * as SessionLogDeepSeek from '@deepseek-ai/dsh-session-log-deepseek'
+import '../../src/tool-result-block.ts'
 import * as Messages from '../../src/index.ts'
 import { DeepSeekFilesClient } from '../../src/common/files-api.ts'
 import { MESSAGES_FILES_BETA } from '../../src/common/messages-api.ts'
-import { assemble, options, user } from './helpers.ts'
+import { assemble, options, user } from '../helpers'
 
 const IN_HISTORY_MODEL = process.env.DEEPSEEK_IN_HISTORY_MODEL
 /**
@@ -37,7 +38,7 @@ afterEach(async () => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
 })
-async function boot(models?: Messages.Config['models']) {
+async function boot(models?: Messages.Options['models']) {
   const home = await mkdtemp(join(tmpdir(), 'dsh-messages-e2e-'))
   cleanups.push(() => rm(home, { recursive: true, force: true }))
   vi.stubEnv('DSH_HOME', home)
@@ -51,7 +52,9 @@ async function boot(models?: Messages.Config['models']) {
     baseURL: E2E_BASE_URL,
     maxTokens: 4096,
     ...models === undefined ? {} : { models },
-  })
+    // e2e config is plain Options; the plugin accepts volatile Config and its
+    // resolver tolerates plain values (plainOptions passes non-volatile through).
+  } as any)
   return ctx
 }
 const tool = { name: 'lookup_value', description: 'Read the requested value. Always call this tool to obtain a value.', parameters: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } }
@@ -61,7 +64,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('DeepSeek Messages real API', () 
     const model = IN_HISTORY_MODEL as string
     // Each case owns the capability, even for a model with an in-history catalog default.
     const ctx = await boot([{ id: model, ...inHistory ? { systemPromptUpdate: 'in-history' as const } : {} }])
-    const history: Message[] = [createSystemMessage('Reply to every user message with exactly PROMPT_FIRST.', 'test'), user('Answer now.')]
+    const history: Message[] = [createSystemMessage('Reply to every user message with exactly PROMPT_FIRST.'), user('Answer now.')]
     const reply = async (expected: string) => {
       const saved = JSON.stringify(history)
       const response = await assemble(ctx.llm.stream(options({ model, messages: history, reasoningEffort: ReasoningEffortId('high') })), model)
@@ -71,10 +74,10 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('DeepSeek Messages real API', () 
       history.push(response.message)
     }
     await reply('PROMPT_FIRST')
-    history.push(createSystemMessage('Reply to every user message with exactly PROMPT_SECOND.', 'test'), user('Answer again.'))
+    history.push(createSystemMessage('Reply to every user message with exactly PROMPT_SECOND.'), user('Answer again.'))
     await reply('PROMPT_SECOND')
     const withoutSystem = history.filter(message => message.role !== 'system')
-    history.splice(0, history.length, createSystemMessage('', 'test'), ...withoutSystem, user('Reply with exactly PROMPT_CLEARED.'))
+    history.splice(0, history.length, createSystemMessage(''), ...withoutSystem, user('Reply with exactly PROMPT_CLEARED.'))
     await reply('PROMPT_CLEARED')
   })
 

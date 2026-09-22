@@ -7,7 +7,7 @@
  * silently re-authenticate the same account).
  */
 import { useEffect, useState } from 'react'
-import { IconUserOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconUserOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './UserSection.module.css'
 
@@ -49,7 +49,7 @@ export function UserSection({ close, t }: UserSectionComponentProps) {
     <div className={css.section}>
       <div className={css.card}>
         <span className={css.avatar} aria-hidden="true">
-          <IconUserOutline16 size={20} />
+          <IconUserOutlineMedium size={20} />
         </span>
         <div className={css.who}>
           <span className={css.kicker}>{t('user.identity')}</span>

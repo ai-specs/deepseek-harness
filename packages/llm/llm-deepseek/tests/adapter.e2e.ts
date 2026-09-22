@@ -8,6 +8,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import LlmRuntime, { createUserMessage, ToolCallId, ReasoningEffortId, createMessage, createSystemMessage } from '@deepseek-ai/dsh-llm'
+import type { Options } from '../src/config.ts'
 import type { Message, ToolSchema } from '@deepseek-ai/dsh-llm'
 import AttachmentStore, { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
 import LocalAttachments from '@deepseek-ai/dsh-attachment-local'
@@ -24,8 +25,9 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import DeepSeekLlmApiExtensionRegistry from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import * as PluginPackageInventoryDeepSeek from '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
 import * as SessionLogDeepSeek from '@deepseek-ai/dsh-session-log-deepseek'
+import { DeepSeekFilesClient as FilesClient } from '../src/common/files-api.ts'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
-import type { Config } from '@deepseek-ai/dsh-llm-deepseek'
+import '../src/tool-result-block.ts'
 import type { WireMessage, WireRequest } from '../src/protocols/chat-completions/types.ts'
 import { assemble, type AssembledResult } from './assemble.ts'
 
@@ -110,7 +112,7 @@ beforeEach(async () => {
   vi.stubEnv('DSH_HOME', identityHome)
 })
 
-async function harness(model: string, config: Partial<Config> = {}) {
+async function harness(model: string, config: Partial<Options> = {}) {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(LlmRuntime)
@@ -120,7 +122,9 @@ async function harness(model: string, config: Partial<Config> = {}) {
     baseURL: E2E_BASE_URL,
     ...model === VISION ? { models: [{ id: VISION, inputModalities: ['text', 'image'] }] } : {},
     ...config,
-  })
+    // e2e config is plain Options; the plugin accepts volatile Config and its
+    // resolver tolerates plain values (plainOptions passes non-volatile through).
+  } as any)
   return ctx
 }
 
@@ -134,7 +138,7 @@ afterEach(async () => {
 function ask(text: string): Message[] {
   return [createUserMessage({
     content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: 'test' },
+    source: { kind: 'user' },
   })]
 }
 
@@ -169,7 +173,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
     const attachment = await ctx.attachments.saveImage({ data: readFileSync(new URL('fixtures/red.png', import.meta.url)), mediaType: 'image/png' })
     const message = ask('What is the dominant color of this image?')[0]!
     const history: Message[] = [
-      createSystemMessage('Answer with one English color word.', 'test'),
+      createSystemMessage('Answer with one English color word.'),
       { ...message, content: [...message.content, { type: 'image', attachment }] },
     ]
     const reply = async () => {
@@ -179,7 +183,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
       return textOf(response).trim().toLowerCase()
     }
     expect(await reply()).toMatch(/^red[.!]?$/)
-    history.push(createSystemMessage('Reply to every user message with exactly banana.', 'test'), ...ask('Answer now.'))
+    history.push(createSystemMessage('Reply to every user message with exactly banana.'), ...ask('Answer now.'))
     expect(await reply()).toBe('banana')
     history.push(...ask('Answer again.'))
     expect(await reply()).toBe('banana')
@@ -205,7 +209,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
       return response
     }
     vi.stubGlobal('fetch', observedFetch)
-    const files = new LlmDeepSeek.DeepSeekFilesClient({ protocol: 'chat-completions', baseURL, apiKey: key })
+    const files = new FilesClient({ protocol: 'chat-completions', baseURL, apiKey: key })
 
     try {
       const result = await assemble(ctx, {
@@ -215,7 +219,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
             { type: 'text', text: 'Briefly describe this image.' },
             { type: 'image', attachment: attachments.ref },
           ],
-          source: { kind: 'plugin', plugin: 'test' },
+          source: { kind: 'user' },
         })],
         maxTokens: 100,
       })
@@ -341,7 +345,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
           ...ask('What is the weather in Paris right now? Use the get_weather tool.'),
           createMessage({
             role: 'assistant', content: first.message.content,
-            source: { kind: 'plugin', plugin: 'test' },
+            source: { kind: 'model', provider: 'deepseek-official', model: FLASH },
           }),
           createUserMessage({
             content: [{
@@ -349,7 +353,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
               toolCallId: ToolCallId(call!.id),
               content: [{ type: 'text', text: 'Sunny, 22°C' }],
             }],
-            source: { kind: 'plugin', plugin: 'test' },
+            source: { kind: 'user' },
           }),
         ],
         tools: [weatherTool],
@@ -373,7 +377,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
       })
       await expect(ctx.llm.resolveModelInfo('deepseek-official', model))
         .resolves.toMatchObject({ systemPromptUpdate: 'in-history' })
-      const system = (text: string) => createSystemMessage(text, 'test')
+      const system = (text: string) => createSystemMessage(text)
       // A nonce before the padding isolates the provider cache across runs and retries.
       const nonce = randomBytes(16).toString('hex')
       const padding = Array.from({ length: 40 }, (_, index) => `Rule ${String(index + 1)}: keep every answer short and factual.`).join('\n')
@@ -424,7 +428,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
         expect(reusableTokens).toBeLessThanOrEqual(initialTokens)
         expect(reusableTokens).toBeGreaterThan(0)
         const assistant = createMessage({
-          role: 'assistant', content: first.message.content, source: { kind: 'plugin', plugin: 'test' },
+          role: 'assistant', content: first.message.content, source: { kind: 'model', provider: 'deepseek-official', model },
         })
 
         const updated = await assemble(ctx, {

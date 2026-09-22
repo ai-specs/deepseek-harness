@@ -7,7 +7,7 @@
  */
 
 import { contentHasImage, IMAGE_OFFLOAD_REQUIRED_CODE, LlmError, offloadedImageText, projectOffloadedImages, requestImageHandleText, requiredImageOffload } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, ImageAttachmentAccessResolver, Message } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, GenerateOptions, ImageAttachmentAccessResolver, Message, RequestMessage } from '@deepseek-ai/dsh-llm'
 import type { ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import type {
   WireImageContentPart,
@@ -92,7 +92,7 @@ function resolveThinking(options: GenerateOptions, defaults: RequestDefaults): R
 }
 
 /** Join the text blocks of a message (used for user/tool-result content). */
-function flattenText(blocks: ContentBlock[]): string {
+function flattenText(blocks: readonly ContentBlock[]): string {
   return blocks
     .filter(block => block.type === 'text')
     .map(block => block.text)
@@ -107,7 +107,7 @@ function assertTextOnly(blocks: readonly ContentBlock[]): void {
 }
 
 /** Reject roles whose DeepSeek history format cannot carry image input. */
-function assertSupportedImageRoles(messages: readonly Message[]): void {
+function assertSupportedImageRoles(messages: readonly RequestMessage[]): void {
   for (const message of messages) {
     if (message.role !== 'user' && contentHasImage(message.content)) {
       throw new LlmError(
@@ -236,7 +236,7 @@ function serializeAssistant(message: Message): WireMessage {
  * @param messages - the harness conversation, in order.
  * @returns the wire messages; order preserved, each tool result expanded into its own entry.
  */
-export function serializeMessages(messages: Message[]): WireMessage[] {
+export function serializeMessages(messages: readonly RequestMessage[]): WireMessage[] {
   const wire: WireMessage[] = []
   for (const message of messages) {
     assertTextOnly(message.content)
@@ -276,7 +276,7 @@ export function serializeMessages(messages: Message[]): WireMessage[] {
  * @returns ordered DeepSeek wire messages.
  */
 export async function serializeMessagesWithImages(
-  messages: readonly Message[],
+  messages: readonly RequestMessage[],
   images: ImageSerializationOptions,
 ): Promise<WireMessage[]> {
   assertSupportedImageRoles(messages)
@@ -390,7 +390,7 @@ export function serializeRequest(
  * failure names how many more oldest retained occurrences need durable
  * omission before the request can be retried.
  */
-function assertRetainedImagesFit(messages: readonly Message[], images: ImageSerializationOptions): void {
+function assertRetainedImagesFit(messages: readonly RequestMessage[], images: ImageSerializationOptions): void {
   const representation = images.representation.kind === 'file' ? 'raw' : 'base64'
   const offloadImages = requiredImageOffload(messages, {
     representation,

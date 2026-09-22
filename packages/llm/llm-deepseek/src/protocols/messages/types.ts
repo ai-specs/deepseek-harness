@@ -14,7 +14,7 @@ export type WireBlock = WireInput
 
 /** Conversation turn; capable routes retain later system updates in message history. */
 export interface WireMessage {
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: WireBlock[]
 }
 

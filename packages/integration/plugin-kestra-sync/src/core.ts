@@ -17,11 +17,21 @@ import { PkceTokenProvider, type PkceConfig } from './pkce.ts'
 
 /** web 进程留存的用户身份（A10 ②）：结构化句柄，避免 integration 包反向依赖 client-connection。 */
 export interface WebIdentityHandle {
-  /** 可用 access token（自动续期）；未登录/链断时 undefined。 */
+  /**
+   * 可用 access token（自动续期）；未登录/链断时 undefined。
+   * @returns 当前可用的 access token；未登录或链路断开时为 undefined。
+   */
   ensureAccessToken(): Promise<string | undefined>
-  /** 当前登录用户 OIDC sub；未加载/未登录时 undefined。 */
+  /**
+   * 当前登录用户 OIDC sub；未加载/未登录时 undefined。
+   * @returns 当前登录用户的 OIDC sub；未加载或未登录时为 undefined。
+   */
   currentSub(): string | undefined
-  /** 登录身份变化时通知消费者；用于立即断开旧用户 SSE 并为新用户重连。 */
+  /**
+   * 登录身份变化时通知消费者；用于立即断开旧用户 SSE 并为新用户重连。
+   * @param listener 身份变化回调，参数为新的 OIDC sub（登出时为 undefined）。
+   * @returns 注销订阅的清理函数。
+   */
   onChange?(listener: (sub: string | undefined) => void): () => void
 }
 
