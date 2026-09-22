@@ -51,7 +51,6 @@ function chatCompletionsResponse(content: Record<string, unknown>, finishReason:
   ].join('')
 }
 
-
 function waitForLine(
   lines: string[],
   predicate: (value: Record<string, unknown>) => boolean,
@@ -536,9 +535,17 @@ it.each(['unset', 'empty', 'bundled', 'full', 'python-only', 'missing-assets', '
     expect(serialized).toContain('primary runtime')
   } else if (enabled) {
     expect(requests).toHaveLength(2)
+    // dsh fork: the sdk profile pins chat-completions, so the tool result arrives
+    // as a chat-shaped user message whose content is a JSON string (escaped when
+    // re-serialized). Assert on the payload facts that survive either protocol
+    // envelope instead of the pretty-printed object, which only matches in the
+    // messages protocol.
     const serialized = JSON.stringify(requests[1]!.messages)
     expect(serialized).toContain('load_workspace_dependencies')
-    expect(serialized).toContain(JSON.stringify(paths, undefined, 2))
+    expect(serialized).toContain(paths.python)
+    expect(serialized).toContain(paths.pythonPackages)
+    if (paths.node !== undefined) expect(serialized).toContain(paths.node)
+    expect(serialized).toContain('python-docx')
   }
   if (mode === 'missing-assets') expect(stderr).toContain('check_office.py')
   await send(3, 'shutdown')
