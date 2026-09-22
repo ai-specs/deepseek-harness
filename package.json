@@ -24,7 +24,7 @@
     "build:bench": "npm run build:native-system && npm run build:lib && tsdown --config benchmarks/tsdown.config.ts",
     "build:official": "tsx scripts/build.ts --profile official",
     "build:lib": "pnpm run build:lib:host && pnpm run build:lib:client",
-    "build:lib:host": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc -b tsconfig.host.json && node scripts/ensure-root-lib-types.mjs && tsdown --env.DSH_BUILD_FACE host",
+    "build:lib:host": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc -b tsconfig.host.json && tsdown --env.DSH_BUILD_FACE host",
     "build:lib:client": "tsc -b tsconfig.client.json && tsdown --env.DSH_BUILD_FACE client",
     "build:web": "pnpm --filter @deepseek-ai/dsh-web-frontend run build",
     "build:desktop": "pnpm --filter @deepseek-ai/dsh-desktop run build",
@@ -258,12 +258,5 @@
     "vitest": "^4.1.8",
     "@deepseek-ai/dsh-skill-office": "workspace:^",
     "@deepseek-ai/dsh-tool-workspace-dependencies": "workspace:^"
-  },
-  "tsdown": {
-    "entry": [
-      "lib/types/index.js",
-      "lib/types/invariant.js",
-      "lib/types/startup.js"
-    ]
   }
 }
