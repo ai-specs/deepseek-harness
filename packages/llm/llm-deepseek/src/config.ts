@@ -129,6 +129,9 @@ export const MESSAGES_BASE_URL = 'https://api.deepseek.com/anthropic'
 
 /** Environment variable naming this provider's endpoint, honored only from trusted layers. */
 const BASE_URL_ENV = 'DEEPSEEK_BASE_URL'
+/** Messages-protocol endpoint env (DashScope Anthropic-compatible root); separate from the
+ * chat-completions endpoint so each protocol hits its own compatible-mode base. */
+const MESSAGES_BASE_URL_ENV = 'DEEPSEEK_MESSAGES_BASE_URL'
 
 /**
  * One resolution's complete request facts. Connection and credential facts
@@ -305,7 +308,8 @@ export function resolveAdapterOptions(config: Options, environment?: LaunchEnvir
     || fileQuotaCleanupBatch > 1_000) {
     throw new Error('llm-deepseek: fileQuotaCleanupBatch must be an integer from 1 through 1000')
   }
-  const baseURL = config.baseURL ?? environment?.get(BASE_URL_ENV)?.value
+  const baseURL = config.baseURL
+    ?? environment?.get(config.protocol === 'messages' ? MESSAGES_BASE_URL_ENV : BASE_URL_ENV)?.value
     ?? (config.protocol === 'messages' ? MESSAGES_BASE_URL : PUBLIC_BASE_URL)
   const parsed = new URL(baseURL)
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
@@ -313,9 +317,10 @@ export function resolveAdapterOptions(config: Options, environment?: LaunchEnvir
   }
   return {
     apiKeyEnv: credentialRef(config.apiKeyEnv ?? DEFAULT_API_KEY_ENV),
-    // Programmatic callers (tests, library users) default to the official
-    // Messages protocol; plugin configs always carry the schema default
-    // ('chat-completions') through plainOptions, so product semantics keep it.
+    // Programmatic callers (tests, library users) default to the upstream
+    // Messages protocol; plugin configs carry an explicit protocol through
+    // plainOptions, so product semantics keep it (dsh fork deployments opt
+    // into chat-completions via settings.yaml).
     protocol: config.protocol ?? 'messages',
     baseURL,
     defaults: {

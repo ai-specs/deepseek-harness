@@ -431,7 +431,7 @@ describe('Cordis provider composition', () => {
   it('uses environment credentials and reports missing or malformed keys without network access', async () => {
     const http = await endpoint()
     const { ctx } = await context()
-    vi.stubEnv('DEEPSEEK_BASE_URL', http.url)
+    vi.stubEnv('DEEPSEEK_MESSAGES_BASE_URL', http.url)
     vi.stubEnv('DEEPSEEK_API_KEY', 'env-key')
     await ctx.plugin(LlmRuntime)
     const fiber = ctx.plugin(Messages, { protocol: 'messages' })

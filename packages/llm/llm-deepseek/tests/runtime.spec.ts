@@ -1831,7 +1831,7 @@ describe('plugin registration and config', () => {
       const ctx = new Context()
       await ctx.plugin(LlmRuntime)
       await expect(ctx.plugin(LlmDeepSeek, {
-      protocol: 'messages',
+        protocol: 'messages',
         baseURL: 'http://127.0.0.1:1',
         thinking: 'disabled',
         reasoningEffort,
@@ -2086,7 +2086,7 @@ describe('plugin registration and config', () => {
       const ctx = new Context()
       await ctx.plugin(LlmRuntime)
       await expect(ctx.plugin(LlmDeepSeek, {
-      protocol: 'messages',
+        protocol: 'messages',
         baseURL: 'http://127.0.0.1:1',
         defaultContextWindow,
       })).rejects.toThrow(/defaultContextWindow/)
@@ -2103,7 +2103,7 @@ describe('plugin registration and config', () => {
       const ctx = new Context()
       await ctx.plugin(LlmRuntime)
       await expect(ctx.plugin(LlmDeepSeek, {
-      protocol: 'messages',
+        protocol: 'messages',
         baseURL: 'http://127.0.0.1:1',
         maxTokens,
       })).rejects.toThrow(/maxTokens/)
@@ -2154,7 +2154,7 @@ describe('plugin registration and config', () => {
       const ctx = new Context()
       await ctx.plugin(LlmRuntime)
       await expect(ctx.plugin(LlmDeepSeek, {
-      protocol: 'messages',
+        protocol: 'messages',
         baseURL: 'http://127.0.0.1:1',
         maxRequestFilesBytes,
       })).rejects.toThrow(/maxRequestFilesBytes/)
@@ -2171,7 +2171,7 @@ describe('plugin registration and config', () => {
       const ctx = new Context()
       await ctx.plugin(LlmRuntime)
       await expect(ctx.plugin(LlmDeepSeek, {
-      protocol: 'messages',
+        protocol: 'messages',
         baseURL: 'http://127.0.0.1:1',
         maxInlineRequestImageBytes,
       })).rejects.toThrow(/maxInlineRequestImageBytes/)
@@ -2239,9 +2239,9 @@ describe('plugin registration and config', () => {
     expect(server.requests).toHaveLength(1) // hit the explicit URL, not env
   })
 
-  it('uses DEEPSEEK_BASE_URL when config omits baseURL', async () => {
+  it('uses the Messages endpoint env when config omits baseURL', async () => {
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
-    vi.stubEnv('DEEPSEEK_BASE_URL', server.url)
+    vi.stubEnv('DEEPSEEK_MESSAGES_BASE_URL', server.url)
     vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)

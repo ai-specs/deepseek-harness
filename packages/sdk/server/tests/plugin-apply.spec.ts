@@ -247,7 +247,7 @@ describe('dsh-sdk-jsonrpc-server plugin apply', () => {
     const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-prompt-'))
     const llmServer = await mockCompletionServer()
     vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
-    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    vi.stubEnv('DEEPSEEK_MESSAGES_BASE_URL', llmServer.url)
     const harness = await mountPlugin(storageDir)
     try {
       harness.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' } })
