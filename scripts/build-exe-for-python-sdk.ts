@@ -308,11 +308,13 @@ class SingleExeBuild {
     ])
     await this.restoreLegacyHoists()
     await this.materializeStagedLinks()
-    if (!this.cli.dryRun) {
+    if (!this.cli.dryRun && !process.env.CI) {
       // pnpm deploy --config.node-linker=hoisted runs a root install that
       // re-arranges the repo-root node_modules (Packages: -N, devDependency
-      // bin links dropped). Re-link the repo root so the pkg step and later
-      // tooling can resolve devDependencies again.
+      // bin links dropped). Re-link the repo root for local development so
+      // the pkg step and later tooling can resolve devDependencies again;
+      // CI runners are ephemeral and package via the physical store, so they
+      // skip the extra install.
       await this.runPnpm('restore repo root after deploy', ['install', '--frozen-lockfile', '--ignore-scripts'])
     }
     if (this.cli.dryRun) {
@@ -437,8 +439,9 @@ class SingleExeBuild {
    * store entry survives the deploy, so fall back to it.
    */
   private pkgEntrypoint(): string | undefined {
-    const rootBin = resolve(root, 'node_modules', '.bin', process.platform === 'win32' ? 'pkg.cmd' : 'pkg')
-    if (existsSync(rootBin)) return rootBin
+    // Prefer the physical store entry: the repo-root .bin/pkg is a POSIX shell
+    // shim that cannot be executed with process.execPath, and pnpm deploy
+    // leaves the root in production mode where .bin links are dropped anyway.
     const store = resolve(root, 'node_modules', '.pnpm')
     if (!existsSync(store)) return undefined
     for (const entry of readdirSync(store).filter(name => name.startsWith('@yao-pkg+pkg@')).sort()) {
