@@ -1,6 +1,7 @@
 /**
- * Scriptable Messages HTTP/SSE server for transport, protocol, and
- * semantic-empty LLM recovery tests. Each accepted Messages request
+ * Scriptable HTTP/SSE server for transport, protocol, and semantic-empty
+ * LLM recovery tests. Accepts either Messages (`/v1/messages`) or
+ * DashScope-compatible chat-completions (`/chat/completions`) requests;
  * consumes one behavior; the server never retries or interprets harness policy.
  *
  * @module @deepseek-ai/dsh-llm-mock-server
@@ -121,6 +122,8 @@ export interface MockLlmServerOptions {
   readonly port?: number
   /** Optional exact API key; omission accepts any x-api-key header. */
   readonly apiKey?: string
+  /** Wire protocol; `messages` by default, `chat-completions` for DashScope-compatible tests. */
+  readonly protocol?: 'chat-completions' | 'messages'
   /** Ordered request behaviors; exhaustion fails loud unless `repeatLast` is true. */
   readonly sequence: readonly MockLlmBehavior[]
   /** Reuse the final behavior after the sequence is consumed. */
@@ -155,7 +158,7 @@ export interface MockLlmServerOptions {
 
 /** Running mock server and captured request state. */
 export interface MockLlmServer {
-  /** Base URL without `/v1`; the endpoint is `/v1/messages`. */
+  /** Base URL; the endpoint is `/v1/messages` (messages) or `/chat/completions` (chat-completions). */
   readonly baseURL: string
   /** Actual bound port, including an OS-assigned value. */
   readonly port: number
@@ -170,6 +173,7 @@ export interface MockLlmServer {
 interface ResolvedOptions {
   readonly host: string
   readonly port: number
+  readonly protocol: 'chat-completions' | 'messages'
   readonly apiKey?: string
   readonly sequence: readonly MockLlmBehavior[]
   readonly lastBehavior: MockLlmBehavior
@@ -202,6 +206,10 @@ function boundedInteger(name: string, value: number, min: number, max: number): 
 }
 
 function resolveOptions(options: MockLlmServerOptions): ResolvedOptions {
+  const protocol = options.protocol ?? 'messages'
+  if (protocol !== 'chat-completions' && protocol !== 'messages') {
+    throw new Error('llm-mock-server: protocol must be chat-completions or messages')
+  }
   const host = options.host ?? '127.0.0.1'
   const port = boundedInteger('port', options.port ?? 0, 0, 65_535)
   const chunkSize = boundedInteger('chunkSize', options.chunkSize ?? 8, 1, Number.MAX_SAFE_INTEGER)
@@ -268,6 +276,7 @@ function resolveOptions(options: MockLlmServerOptions): ResolvedOptions {
   return {
     host,
     port,
+    protocol,
     ...options.apiKey === undefined ? {} : { apiKey: options.apiKey },
     sequence: [...options.sequence],
     lastBehavior,
@@ -324,8 +333,8 @@ function writeSse(record: MockLlmRequestRecord, response: ServerResponse, payloa
   record.chunksSent += 1
 }
 
-function writeDone(record: MockLlmRequestRecord, response: ServerResponse): void {
-  writeSse(record, response, { type: 'message_stop' })
+function writeDone(record: MockLlmRequestRecord, response: ServerResponse, protocol: MockLlmServerOptions['protocol']): void {
+  writeSse(record, response, protocol === 'chat-completions' ? '[DONE]' : { type: 'message_stop' })
 }
 
 function finishRecord(
@@ -364,18 +373,27 @@ function httpError(
   finishRecord(options, record, 'completed')
 }
 
-function startMessage(record: MockLlmRequestRecord, response: ServerResponse): void {
+function startMessage(record: MockLlmRequestRecord, response: ServerResponse, protocol: MockLlmServerOptions['protocol']): void {
+  if (protocol === 'chat-completions') return
   writeSse(record, response, {
     type: 'message_start',
     message: { id: 'mock-message', type: 'message', role: 'assistant', model: 'mock-model', content: [], usage: { input_tokens: 3, output_tokens: 0 } },
   })
 }
 
-function startText(record: MockLlmRequestRecord, response: ServerResponse, index: number): void {
+function startText(record: MockLlmRequestRecord, response: ServerResponse, index: number, protocol: MockLlmServerOptions['protocol']): void {
+  if (protocol === 'chat-completions') return
   writeSse(record, response, { type: 'content_block_start', index, content_block: { type: 'text', text: '' } })
 }
 
-function terminalChunk(reason: string, outputTokens: number): unknown {
+function terminalChunk(reason: string, outputTokens: number, protocol: MockLlmServerOptions['protocol']): unknown {
+  if (protocol === 'chat-completions') {
+    const chatReason: Record<string, string> = { end_turn: 'stop', max_tokens: 'length', tool_use: 'tool_calls' }
+    return {
+      choices: [{ index: 0, delta: { content: '' }, finish_reason: chatReason[reason] ?? reason }],
+      usage: { prompt_tokens: 3, completion_tokens: outputTokens },
+    }
+  }
   return {
     type: 'message_delta',
     delta: { stop_reason: reason, stop_sequence: null },
@@ -408,7 +426,9 @@ async function streamText(
   index = 0,
 ): Promise<boolean> {
   for (const chunk of splitText(text, options.chunkSize)) {
-    writeSse(record, response, { type: 'content_block_delta', index, delta: { type: 'text_delta', text: chunk } })
+    writeSse(record, response, options.protocol === 'chat-completions'
+      ? { choices: [{ index: 0, delta: { content: chunk }, finish_reason: null }] }
+      : { type: 'content_block_delta', index, delta: { type: 'text_delta', text: chunk } })
     if (!await pause(delayMs, response)) return false
   }
   return true
@@ -422,14 +442,14 @@ async function completeText(
   delayMs: number,
   index = 0,
 ): Promise<void> {
-  startText(record, response, index)
+  if (options.protocol !== 'chat-completions') startText(record, response, index, options.protocol)
   if (!await streamText(options, record, response, options.successText, delayMs, index)) {
     finishRecord(options, record, 'client_closed')
     return
   }
-  writeSse(record, response, { type: 'content_block_stop', index })
-  writeSse(record, response, terminalChunk(reason, Array.from(options.successText).length))
-  writeDone(record, response)
+  if (options.protocol !== 'chat-completions') writeSse(record, response, { type: 'content_block_stop', index })
+  writeSse(record, response, terminalChunk(reason, Array.from(options.successText).length, options.protocol))
+  writeDone(record, response, options.protocol)
   response.end()
   finishRecord(options, record, 'completed')
 }
@@ -449,6 +469,31 @@ async function disconnect(
 
 function toolCallChunks(options: ResolvedOptions): readonly unknown[] {
   const midpoint = Math.max(1, Math.floor(options.toolArguments.length / 2))
+  if (options.protocol === 'chat-completions') {
+    return [
+      {
+        choices: [{
+          index: 0,
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'mock-call-1',
+              type: 'function',
+              function: { name: options.toolName, arguments: options.toolArguments.slice(0, midpoint) },
+            }],
+          },
+          finish_reason: null,
+        }],
+      },
+      {
+        choices: [{
+          index: 0,
+          delta: { tool_calls: [{ index: 0, function: { arguments: options.toolArguments.slice(midpoint) } }] },
+          finish_reason: null,
+        }],
+      },
+    ]
+  }
   return [
     { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'mock-call-1', name: options.toolName, input: {} } },
     ...[options.toolArguments.slice(0, midpoint), options.toolArguments.slice(midpoint)].map(partial => ({
@@ -478,9 +523,9 @@ async function runBehavior(
       return
     case 'empty':
       openSse(response)
-      startMessage(record, response)
-      writeSse(record, response, terminalChunk('end_turn', 0))
-      writeDone(record, response)
+      startMessage(record, response, options.protocol)
+      writeSse(record, response, terminalChunk('end_turn', 0, options.protocol))
+      writeDone(record, response, options.protocol)
       response.end()
       finishRecord(options, record, 'completed')
       return
@@ -491,22 +536,26 @@ async function runBehavior(
       return
     case 'stream_eof':
       openSse(response)
-      startMessage(record, response)
+      if (options.protocol === 'chat-completions') {
+        writeSse(record, response, { choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] })
+      } else {
+        startMessage(record, response, options.protocol)
+      }
       response.end()
       finishRecord(options, record, 'completed')
       return
     case 'partial_eof':
       openSse(response)
-      startMessage(record, response)
-      startText(record, response, 0)
+      startMessage(record, response, options.protocol)
+      startText(record, response, 0, options.protocol)
       await streamText(options, record, response, options.partialText, 0)
       response.end()
       finishRecord(options, record, 'completed')
       return
     case 'partial_disconnect':
       openSse(response)
-      startMessage(record, response)
-      startText(record, response, 0)
+      startMessage(record, response, options.protocol)
+      startText(record, response, 0, options.protocol)
       if (!await streamText(options, record, response, options.partialText, options.chunkDelayMs)) return
       await disconnect(options, record, response)
       return
@@ -517,20 +566,22 @@ async function runBehavior(
     case 'malformed_json':
       openSse(response)
       writeSse(record, response, '{not-json')
-      writeDone(record, response)
+      writeDone(record, response, options.protocol)
       response.end()
       finishRecord(options, record, 'completed')
       return
     case 'malformed_event':
       openSse(response)
-      writeSse(record, response, { type: 'content_block_start', index: 0, content_block: null })
-      writeDone(record, response)
+      writeSse(record, response, options.protocol === 'chat-completions'
+        ? { choices: [null] }
+        : { type: 'content_block_start', index: 0, content_block: null })
+      writeDone(record, response, options.protocol)
       response.end()
       finishRecord(options, record, 'completed')
       return
     case 'wrong_content_type':
       openSse(response, 'application/json')
-      startMessage(record, response)
+      startMessage(record, response, options.protocol)
       await completeText(options, record, response, 'end_turn', 0)
       return
     case 'rate_limit':
@@ -564,12 +615,21 @@ async function runBehavior(
       return
     case 'success':
       openSse(response)
-      startMessage(record, response)
+      startMessage(record, response, options.protocol)
       await completeText(options, record, response, 'end_turn', 0)
       return
     case 'reasoning_success':
       openSse(response)
-      startMessage(record, response)
+      if (options.protocol === 'chat-completions') {
+        for (const chunk of splitText(options.reasoningText, options.chunkSize)) {
+          writeSse(record, response, {
+            choices: [{ index: 0, delta: { reasoning_content: chunk }, finish_reason: null }],
+          })
+        }
+        await completeText(options, record, response, 'end_turn', 0)
+        return
+      }
+      startMessage(record, response, options.protocol)
       writeSse(record, response, { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } })
       for (const chunk of splitText(options.reasoningText, options.chunkSize)) {
         writeSse(record, response, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: chunk } })
@@ -579,21 +639,21 @@ async function runBehavior(
       return
     case 'tool_call_success':
       openSse(response)
-      startMessage(record, response)
+      startMessage(record, response, options.protocol)
       for (const chunk of toolCallChunks(options)) writeSse(record, response, chunk)
-      writeSse(record, response, terminalChunk('tool_use', 2))
-      writeDone(record, response)
+      writeSse(record, response, terminalChunk('tool_use', 2, options.protocol))
+      writeDone(record, response, options.protocol)
       response.end()
       finishRecord(options, record, 'completed')
       return
     case 'max_tokens':
       openSse(response)
-      startMessage(record, response)
+      startMessage(record, response, options.protocol)
       await completeText(options, record, response, 'max_tokens', 0)
       return
     case 'slow_success':
       openSse(response)
-      startMessage(record, response)
+      startMessage(record, response, options.protocol)
       await completeText(options, record, response, 'end_turn', options.chunkDelayMs)
       return
   }
@@ -663,13 +723,16 @@ export async function startMockLlmServer(options: MockLlmServerOptions): Promise
       response.writeHead(405, { allow: 'POST' }).end()
       return
     }
-    if (!path.endsWith('/v1/messages')) {
+    const isChat = resolved.protocol === 'chat-completions'
+    if (!path.endsWith(isChat ? '/chat/completions' : '/v1/messages')) {
       response.writeHead(404).end()
       return
     }
-    if (resolved.apiKey !== undefined && request.headers['x-api-key'] !== resolved.apiKey) {
+    if (resolved.apiKey !== undefined && (isChat
+      ? request.headers.authorization !== `Bearer ${resolved.apiKey}`
+      : request.headers['x-api-key'] !== resolved.apiKey)) {
       response.writeHead(401, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({ error: { message: 'invalid mock API key', code: 'invalid_api_key' } }))
+      response.end(JSON.stringify({ error: { message: isChat ? 'invalid mock bearer token' : 'invalid mock API key', code: 'invalid_api_key' } }))
       return
     }
 

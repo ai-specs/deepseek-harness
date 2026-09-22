@@ -28,8 +28,9 @@ const MODEL_MODALITIES = ['text', 'image'] as const satisfies readonly ModelModa
 export interface Config {
   /**
    * dsh fork: DashScope compatible-mode wire protocol selector. Defaults to
-   * `chat-completions`; upstream only speaks `messages`. The schema below
-   * rejects runtime reconfiguration (see the schema's assert).
+   * `messages` (upstream); deployments speaking DashScope compatible-mode set
+   * `protocol: chat-completions` explicitly. The schema below rejects runtime
+   * reconfiguration (see the schema's assert).
    */
   protocol: 'chat-completions' | 'messages'
   /** Credential reference (environment-variable name) resolved per request; defaults to `DEEPSEEK_API_KEY`. */
@@ -96,8 +97,9 @@ const catalogModel: z<DeepSeekCatalogModel> = z.object({
 })
 
 export const Config = z.object({
-  // dsh fork: DashScope compatible-mode speaks chat-completions, and the
-  protocol: z.union(['chat-completions', 'messages']).default('chat-completions'),
+  // dsh fork: DashScope compatible-mode speaks chat-completions; the schema
+  // default stays messages to match upstream, deployments opt in explicitly.
+  protocol: z.union(['chat-completions', 'messages']).default('messages'),
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV).volatile(),
   baseURL: z.string().volatile(),
   thinking: z.union(['enabled', 'disabled']).volatile(),
