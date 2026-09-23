@@ -643,8 +643,12 @@ export function deriveHistory(
 ): Array<{ role: 'user' | 'assistant'; text: string }> {
   const isPluginInjection = (message: { source?: unknown }): boolean => {
     const source = message.source
-    return typeof source === 'object' && source !== null
-      && (source as { kind?: unknown }).kind === 'plugin'
+    if (typeof source !== 'object' || source === null) return false
+    const kind = (source as { kind?: unknown }).kind
+    // 插件注入与 runtime-context 快照都不是真实用户轮次：前者 source.kind==='plugin'
+    // （历史实现），后者为 'runtime-context'（agent-loop 注入）。两者都不进入手机投影，
+    // 否则会污染 record 的末位 user 判断（把注入消息当用户追问，重复追加 prompt/result）。
+    return kind === 'plugin' || kind === 'runtime-context'
   }
   const history: Array<{ role: 'user' | 'assistant'; text: string }> = []
   for (const message of messages) {
@@ -874,6 +878,10 @@ export class SessionIndex {
       phase: session.phase,
       updatedAt: session.updatedAt,
       nextSeq: history.length,
+      // 权威标题随消息响应下推（手机端详情顶栏以此为准）：PC 会话标题
+      // （LLM provider 生成）已回填 SessionIndex，增量读取时手机端直接可见，
+      // 不再依赖列表对账的时序窗口（列表缓存可能尚为 prompt 回退）。
+      title: session.title,
       ...(prefixItem === undefined
         ? {}
         : { prefix: { role: prefixItem.role, len: prefixItem.text.length, head: prefixItem.text.slice(0, 40) } }),

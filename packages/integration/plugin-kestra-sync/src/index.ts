@@ -481,9 +481,21 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
     }
   }
 
+  /**
+   * 方案 A（统一执行面）：手机 relay 输入在 PC web 进程内以 live Agent 执行——
+   * 与 PC UI 直接新建会话同机制。新会话先 `session.create`（会话实体 id = 手机端
+   * sessionId，两端同 id、PC 为权威），再 `prompt` 驱动；追问 resume 同一实体。
+   * 会话因此进入 PC 原生会话体系（PC UI 列表可见、live agent 可保持续上下文、
+   * `session/title` 权威标题回填 SessionIndex——手机端标题 = PC 权威）。
+   * 返回 false 表示 live agent 不可用/创建失败，由调用方回退 headless 子进程保底。
+   */
   const executeOnLiveAgent = async (
     input: RemoteInput,
-    headlessSessionId: string,
+    pcSessionId: string,
+    options: {
+      isNewSession?: boolean
+      workspaceId?: string
+    },
   ): Promise<boolean> => {
     interface LiveAgent {
       whenIdle(): Promise<void>
@@ -496,6 +508,12 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
     const host = ctx as Context & {
       agents?: { get(id: string): LiveAgent | undefined }
       sessionController?: {
+        create?(request: {
+          sessionId: string
+          workspaceId?: string
+          cwd?: string
+          agentPreset?: string
+        }): Promise<{ sessionId: string }>
         prompt(request: {
           requestId: string
           sessionId: string
@@ -505,17 +523,34 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       }
     }
     if (host.agents === undefined || host.sessionController === undefined) return false
+    // SessionIndex 主键恒为手机端稳定 sessionId（手机查询面）；pcSessionId 只用于
+    // PC 侧会话实体（新会话=手机 sessionId；旧数据兼容=headlessSessionId）。
+    const recordSessionId = input.sessionId ?? pcSessionId
 
     const startedAt = Date.now()
-    process.stderr.write(`[kestra-sync] remote input using live PC agent: session=${input.sessionId} headless=${headlessSessionId}\n`)
+    process.stderr.write(`[kestra-sync] remote input using live PC agent: session=${input.sessionId} pc=${pcSessionId} new=${options.isNewSession === true}\n`)
     try {
+      // 新会话：先 create（幂等 adopt，会话实体 id=手机 sessionId，cwd 由 workspace/defaultCwd 决定）。
+      if (options.isNewSession === true) {
+        if (host.sessionController.create === undefined) return false
+        try {
+          await host.sessionController.create({
+            sessionId: pcSessionId,
+            ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }),
+          })
+        } catch (createError) {
+          // 创建失败（如 workspace not found）→ 回退 headless 子进程兜底（老行为保留）。
+          process.stderr.write(`[kestra-sync] live PC agent create failed, falling back: session=${input.sessionId} error=${String(createError)}\n`)
+          return false
+        }
+      }
       await host.sessionController.prompt({
         requestId: randomUUID(),
-        sessionId: headlessSessionId,
+        sessionId: pcSessionId,
         mode: 'queue',
         content: [{ type: 'text', text: input.text }],
       }, new AbortController().signal)
-      const agent = host.agents.get(headlessSessionId)
+      const agent = host.agents.get(pcSessionId)
       if (agent === undefined) throw new Error('SessionController accepted input without publishing the live Agent')
       // whenIdle 竞速超时：远程输入链是串行的，agent 卡死（如 LLM 流停滞）时若无限
       // 等待，一个卡死的回合会堵死所有后续远程输入。超时落 failed 终态并释放链。
@@ -529,17 +564,16 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       const hitTimeout = await Promise.race([idle, timedOut])
       if (idleTimer !== undefined) clearTimeout(idleTimer)
       if (hitTimeout) {
-        process.stderr.write(`[kestra-sync] live PC agent idle timeout (${idleTimeoutMs}ms): session=${input.sessionId} headless=${headlessSessionId}\n`)
+        process.stderr.write(`[kestra-sync] live PC agent idle timeout (${idleTimeoutMs}ms): session=${recordSessionId}\n`)
         index.record({
-          sessionId: input.sessionId ?? headlessSessionId,
+          sessionId: recordSessionId,
           phase: 'failed',
           prompt: input.text,
           result: `执行超时：live agent ${Math.round(idleTimeoutMs / 1000)}s 未回到空闲`,
-          headlessSessionId,
         })
         void client.reportMetric({
           type: 'session_end',
-          sessionId: input.sessionId ?? headlessSessionId,
+          sessionId: recordSessionId,
           outcome: 'failed',
           durationMs: Date.now() - startedAt,
         })
@@ -548,37 +582,35 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       const derived = agent.session.deriveMessages()
       const result = foldSyncState(derived).result ?? ''
       const agentEvents = agent.session.snapshotEvents?.() ?? []
-      // 会话标题以 PC 端为准：LLM 生成标题（provider）则镜像为 title。
+      // 会话标题以 PC 端为准：LLM 生成标题（provider）则镜像为 title（回填 SessionIndex）。
       const providerTitle = deriveTitleFromLog(agentEvents)
       index.record({
-        sessionId: input.sessionId ?? headlessSessionId,
+        sessionId: recordSessionId,
         phase: 'completed',
         prompt: input.text,
         ...(result === '' ? {} : { result }),
-        headlessSessionId,
         // 完整轮次（含 PC web 直发轮）作为权威历史：手机游标增量内可见 PC 插入的消息。
         derivedHistory: deriveHistory(derived),
         ...(providerTitle === undefined ? {} : { title: providerTitle }),
       })
       void client.reportMetric({
         type: 'session_end',
-        sessionId: input.sessionId ?? headlessSessionId,
+        sessionId: recordSessionId,
         outcome: 'completed',
         durationMs: Date.now() - startedAt,
       })
       return true
     } catch (e) {
-      process.stderr.write(`[kestra-sync] live PC agent input failed: session=${input.sessionId} error=${String(e)}\n`)
+      process.stderr.write(`[kestra-sync] live PC agent input failed: session=${recordSessionId} error=${String(e)}\n`)
       index.record({
-        sessionId: input.sessionId ?? headlessSessionId,
+        sessionId: recordSessionId,
         phase: 'failed',
         prompt: input.text,
         result: `执行失败：${String(e).slice(0, 200)}`,
-        headlessSessionId,
       })
       void client.reportMetric({
         type: 'session_end',
-        sessionId: input.sessionId ?? headlessSessionId,
+        sessionId: recordSessionId,
         outcome: 'failed',
         durationMs: Date.now() - startedAt,
       })
@@ -601,32 +633,33 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
           headlessSessionMap.get(input.sessionId)
           ?? (index.get(input.sessionId) as { state?: { headlessSessionId?: string } } | undefined)?.state?.headlessSessionId
         )
-        if (input.newSession !== true && persistedHeadlessId) {
-          return executeOnLiveAgent(input, persistedHeadlessId).then((handled) => {
-            if (handled) return
-            return executeRemoteInput(client, input, {
-              timeoutSeconds: config.remoteInputTimeoutSeconds ?? 300,
-              selection,
-              getPhase: sessionId => String(index.get(sessionId)?.phase ?? '') || undefined,
-              getHeadlessSessionId: () => persistedHeadlessId,
-              getWorkspace,
-            }, recordExecuted)
-          })
-        }
-        return executeRemoteInput(client, input, {
-          timeoutSeconds: config.remoteInputTimeoutSeconds ?? 300,
-          selection,
-          // 追问的父会话 phase 从本地索引读取（会话数据权威在 PC）。
-          getPhase: sessionId => String(index.get(sessionId)?.phase ?? '') || undefined,
-          // 查手机端 sessionId 对应的 headless 内部 sessionId（内存优先，回落持久化索引）。
-          getHeadlessSessionId: (sessionId) => {
-            const mem = headlessSessionMap.get(sessionId)
-            if (mem) return mem
-            const persisted = (index.get(sessionId) as { state?: { headlessSessionId?: string } } | undefined)?.state?.headlessSessionId
-            return typeof persisted === 'string' && persisted ? persisted : undefined
-          },
-          getWorkspace,
-        }, recordExecuted)
+        // 方案 A（统一执行面）：新会话/无 headless 映射的追问 → PC web live agent
+        // （会话实体=手机 sessionId：PC UI 可见、live agent 保持续上下文、权威标题
+        // 回填；追问 resume 同一实体）。旧数据（headlessSessionId 映射）追问 → 兼容
+        // resume 既有 headless 会话实体。live agent 不可用/创建失败 → 回退 headless
+        // 子进程保底（老行为）。
+        const pcSessionId = input.sessionId ?? randomUUID()
+        const useLegacyHeadless = input.newSession !== true && persistedHeadlessId !== undefined
+        return executeOnLiveAgent(input, useLegacyHeadless ? persistedHeadlessId : pcSessionId, {
+          isNewSession: input.newSession === true,
+          ...(useLegacyHeadless || input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
+        }).then((handled) => {
+          if (handled) return
+          return executeRemoteInput(client, input, {
+            timeoutSeconds: config.remoteInputTimeoutSeconds ?? 300,
+            selection,
+            // 追问的父会话 phase 从本地索引读取（会话数据权威在 PC）。
+            getPhase: sessionId => String(index.get(sessionId)?.phase ?? '') || undefined,
+            // 查手机端 sessionId 对应的 headless 内部 sessionId（内存优先，回落持久化索引）。
+            getHeadlessSessionId: (sessionId) => {
+              const mem = headlessSessionMap.get(sessionId)
+              if (mem) return mem
+              const persisted = (index.get(sessionId) as { state?: { headlessSessionId?: string } } | undefined)?.state?.headlessSessionId
+              return typeof persisted === 'string' && persisted ? persisted : undefined
+            },
+            getWorkspace,
+          }, recordExecuted)
+        })
       })
       .catch(() => {})
     return chain.p
