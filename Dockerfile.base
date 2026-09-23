@@ -14,7 +14,7 @@
 # 从工作区 node_modules 解析 Cordis 插件，因此 dev 依赖无法安全剪除。
 FROM node:24-slim
 
-# pnpm 11+ 只读 .npmrc（registry 由 .npmrc 决定= npmjs 优先，见文件头注释）；
+# pnpm 11+ 只读 .npmrc（registry 由 .npmrc 决定= npmmirror，见文件头注释）；
 # 此 ENV 仅影响 npm/npx（npm pack 拉 native 预编译包）。保持与历史一致以免
 # 使下方 apt 层缓存失效（apt 源在当前网络下不稳，重跑易失败）。
 ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
@@ -38,15 +38,17 @@ COPY vendor vendor
 COPY native native
 COPY packages packages
 COPY apps apps
-# registry 走 pnpm 默认（npmjs，完整但慢），显式加大超时与重试；
-# npmmirror 作为回退（快，但个别平台 tarball 重定向会超时）。
+# registry 与 .npmrc 对齐（npmmirror，2026-09-16 起 Docker 构建内实测可达；
+# npmjs 在 Docker 构建内持续 ECONNRESET）。supply-chain policy 按 --registry
+# 的 published metadata 校验 lockfile tarball URL，两端必须一致，否则
+# [ERR_PNPM_TARBALL_URL_MISMATCH] 阻塞构建。
 # store 走 BuildKit 缓存挂载：COPY 层变化时不重下依赖。
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     (CI=true pnpm install --no-frozen-lockfile --ignore-scripts \
-      --registry=https://registry.npmjs.org \
+      --registry=https://registry.npmmirror.com \
       --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-maxtimeout=120000 \
   || CI=true pnpm install --no-frozen-lockfile --ignore-scripts \
-      --registry=https://registry.npmjs.org \
+      --registry=https://registry.npmmirror.com \
       --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-maxtimeout=120000)
 # 以下是纯编译输入（非 workspace 成员）：变更只影响缓存到这一层为止
 COPY tsconfig.json tsconfig.base.json tsconfig.host.json tsconfig.client.json tsdown.config.ts ./
