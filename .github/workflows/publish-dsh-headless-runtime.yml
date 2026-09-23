@@ -3,9 +3,19 @@
 # 触发：手动（workflow_dispatch）输入上游 dsh npm 版本；镜像 tag 与版本一致。
 # 推送目标：ghcr.io/ai-specs/dsh-headless-runtime:<version>（多架构 amd64/arm64）。
 #
+# ============================================================
+# 【版本升级义务 —— 与 docker/dsh-headless-runtime/Dockerfile 同步】
+# 本 workflow 发布"上游 @deepseek-ai/dsh" npm 包（build-arg DSH_VERSION），
+# 与 fork 自身版本线不一定同步。每次 fork 完成上游 release merge 后，
+# 若上游 dist-tags.alpha 已前进，须按 Dockerfile 头部的四步升级流程执行：
+#   npm view @deepseek-ai/dsh dist-tags --json  → 比对下方示例/当前 GHCR tag
+#   → 更新此处 inputs.dsh_version 描述示例 → 触发本 workflow 发布新 tag。
+# 当前已发布基线：0.1.7-alpha.2（上游 2026-09-23 release）。
+# ============================================================
+#
 # 用法：
 #   GitHub → Actions → "Publish dsh headless runtime image" → Run workflow
-#   → dsh_version 填上游版本（如 0.1.6-alpha.1）
+#   → dsh_version 填上游版本（如 0.1.7-alpha.2）
 #
 # 与 Kestra flow 的对接：
 #   本地开发用 pullPolicy: NEVER + 本地同名镜像（docker build -t dsh-headless-runtime:<version>）；
@@ -17,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       dsh_version:
-        description: '上游 @deepseek-ai/dsh npm 版本（镜像 tag 与此一致），如 0.1.6-alpha.1'
+        description: '上游 @deepseek-ai/dsh npm 版本（镜像 tag 与此一致），如 0.1.7-alpha.2'
         required: true
         type: string
 
