@@ -3,9 +3,9 @@ import type { Volatile } from '@deepseek-ai/cordis'
 
 import z from '@deepseek-ai/schemastery'
 import { isVolatile } from '@deepseek-ai/cosmokit'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
 import type { ModelModality, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type { DeepSeekCatalogModel, DeepSeekConnectionOptions } from './types.ts'
@@ -13,18 +13,11 @@ import { DEFAULT_MODELS } from './models.ts'
 import { DEFAULT_STREAM_IDLE_TIMEOUT_MS, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS, DEFAULT_MAX_INLINE_REQUEST_IMAGE_BYTES, DEFAULT_IMAGE_OFFLOAD_BYTE_QUANTUM, DEFAULT_INLINE_IMAGE_OFFLOAD_BYTE_QUANTUM, DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM, DEFAULT_FILE_EXPIRY_SECONDS, DEFAULT_FILE_REFRESH_MARGIN_SECONDS, DEFAULT_FILE_QUOTA_CLEANUP_BATCH, DEFAULT_FILES_API_TIMEOUT_MS } from './defaults.ts'
 import { DEFAULT_MAX_IMAGES_PER_REQUEST, DEFAULT_MAX_REQUEST_FILES_BYTES, DEFAULT_REQUEST_IMAGE_MAX_BYTES } from './request-pricing.ts'
 
-const DEFAULT_API_KEY_ENV = 'DEEPSEEK_API_KEY'
-
 const MODEL_MODALITIES = ['text', 'image'] as const satisfies readonly ModelModality[]
 
-/**
- * Plugin config, validated by the same-named schemastery schema and doubling
- * as the `llm-deepseek` settings-section shape. Every field is optional in
- * yml: a missing API key resolves through {@link Config.apiKeyEnv} at each
- * request (a request without any key fails with `MISSING_CREDENTIAL`, not at
- * plugin load), omitted thinking mode uses the provider default, and omitted
- * reasoning effort resolves to `high`.
- */
+const DEFAULT_API_KEY_ENV = 'DEEPSEEK_API_KEY'
+
+/** Shared Messages request configuration, without provider credential selection. */
 export interface Config {
   /**
    * dsh fork: DashScope compatible-mode wire protocol selector. Defaults to
@@ -33,8 +26,6 @@ export interface Config {
    * reconfiguration (see the schema's assert).
    */
   protocol: 'chat-completions' | 'messages'
-  /** Credential reference (environment-variable name) resolved per request; defaults to `DEEPSEEK_API_KEY`. */
-  apiKeyEnv: Volatile<string>
   /** Endpoint base; falls back to $DEEPSEEK_BASE_URL from a trusted environment layer, then the public API. */
   baseURL: Volatile<string | undefined>
   /** Deployment thinking policy; `disabled` limits every conversation request to `off`. */
@@ -94,13 +85,14 @@ const catalogModel: z<DeepSeekCatalogModel> = z.object({
   imagePixelBudget: z.union([z.number().step(1).min(1), 'low']),
   imageMaxBytes: z.number().step(1).min(1),
   systemPromptUpdate: z.const('in-history'),
+  toolUpdate: z.union(['in-history', 'addition-only'] as const),
 })
 
-export const Config = z.object({
+/** Shared schema fields for Messages protocol options. */
+export const deepSeekConfigFields = {
   // dsh fork: DashScope compatible-mode speaks chat-completions; the schema
   // default stays messages to match upstream, deployments opt in explicitly.
   protocol: z.union(['chat-completions', 'messages']).default('messages'),
-  apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV).volatile(),
   baseURL: z.string().volatile(),
   thinking: z.union(['enabled', 'disabled']).volatile(),
   reasoningEffort: z.union(['off', 'low', 'high', 'max']).volatile(),
@@ -119,7 +111,38 @@ export const Config = z.object({
   fileRefreshMarginSeconds: z.number().step(1).min(0).default(DEFAULT_FILE_REFRESH_MARGIN_SECONDS).volatile(),
   fileQuotaCleanupBatch: z.number().step(1).min(1).max(1_000).default(DEFAULT_FILE_QUOTA_CLEANUP_BATCH).volatile(),
   retryPolicy: RetryPolicySchema.volatile(),
-})
+}
+
+export const Config = z.object(deepSeekConfigFields)
+
+/**
+ * dsh fork: the inline provider's configuration extends the shared fields with
+ * one API-key credential reference (upstream split this into a separate
+ * llm-deepseek-api-key package; the fork's single plugin keeps it inline).
+ */
+export interface ConfigWithApiKey extends Config {
+  /** Credential reference (environment-variable name) resolved per request; defaults to `DEEPSEEK_API_KEY`. */
+  apiKeyEnv: Volatile<string>
+}
+
+/** Plain options accepted by the fork's inline provider resolver. */
+export type OptionsWithApiKey = Options & { apiKeyEnv?: string }
+
+/** Schema fields for the fork's inline provider configuration. */
+export const deepSeekApiKeyConfigFields = {
+  ...deepSeekConfigFields,
+  apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV).volatile(),
+}
+
+export const ConfigWithApiKey = z.object(deepSeekApiKeyConfigFields)
+
+/** Read the current value behind every reference of a validated fork Config.
+ * @param config Parsed fork plugin Config.
+ * @returns Plain options for the resolver, including the credential reference.
+ */
+export function plainOptionsWithApiKey(config: ConfigWithApiKey): OptionsWithApiKey {
+  return { ...plainOptions(config), apiKeyEnv: config.apiKeyEnv.get() }
+}
 
 /** Public API default; the internal endpoint comes from $DEEPSEEK_BASE_URL. */
 export const PUBLIC_BASE_URL = 'https://api.deepseek.com'
@@ -133,12 +156,7 @@ const BASE_URL_ENV = 'DEEPSEEK_BASE_URL'
  * chat-completions endpoint so each protocol hits its own compatible-mode base. */
 const MESSAGES_BASE_URL_ENV = 'DEEPSEEK_MESSAGES_BASE_URL'
 
-/**
- * One resolution's complete request facts. Connection and credential facts
- * are one value on purpose: a snapshot the resolver rejects keeps the whole
- * previous generation, so a request can never pair a stale endpoint with a
- * newer key.
- */
+/** Complete protocol settings captured for one request operation. */
 export type ResolvedDeepSeekOptions = DeepSeekConnectionOptions
 
 /** Resolve, validate, and detach the advisory model catalog. */
@@ -194,6 +212,10 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
     if (systemPromptUpdate !== undefined && systemPromptUpdate !== 'in-history') {
       throw new Error(`llm-deepseek: catalog model "${model.id}" systemPromptUpdate must be "in-history" when present`)
     }
+    const toolUpdate: string | undefined = model.toolUpdate
+    if (toolUpdate !== undefined && toolUpdate !== 'in-history' && toolUpdate !== 'addition-only') {
+      throw new Error(`llm-deepseek: catalog model "${model.id}" toolUpdate must be "in-history" or "addition-only" when present`)
+    }
     if (seen.has(model.id)) throw new Error(`llm-deepseek: duplicate catalog model "${model.id}"`)
     seen.add(model.id)
     return {
@@ -203,6 +225,7 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
       ...model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow },
       ...model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens },
       ...model.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: model.systemPromptUpdate },
+      ...model.toolUpdate === undefined ? {} : { toolUpdate: model.toolUpdate },
       inputModalities: [...inputModalities],
       ...hasImage
         ? {
@@ -215,8 +238,8 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
 }
 
 /**
- * The one explicit resolve step from raw config to validated connection
- * facts. Programmatic construction may bypass Schemastery normalization, so
+ * The one explicit resolve step from raw config to validated protocol
+ * settings. Programmatic construction may bypass Schemastery normalization, so
  * every default and bound is re-judged here — for the composition entry at
  * load (fail loud) and for each settings snapshot at its first use.
  * @param config - raw plugin config or resolved settings snapshot.
@@ -224,9 +247,9 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
  * the product CLI. Every layer may supply an endpoint: the product trusts the
  * project it is launched in, so a checkout can point its own agent at the
  * gateway that checkout is meant to use.
- * @returns validated connection facts plus the credential reference.
+ * @returns validated protocol settings.
  */
-export function resolveAdapterOptions(config: Options, environment?: LaunchEnvironmentSnapshot): ResolvedDeepSeekOptions {
+export function resolveAdapterOptions(config: OptionsWithApiKey, environment?: LaunchEnvironmentSnapshot): ResolvedDeepSeekOptions {
   if (config.thinking === 'disabled'
     && config.reasoningEffort !== undefined
     && config.reasoningEffort !== 'off') {

@@ -7,7 +7,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { chmod, copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
@@ -252,7 +252,10 @@ function pnpmInvocation(args: string[]): [command: string, args: string[]] {
  * @returns the printable command line.
  */
 function formatCommand(command: string, args: string[]): string {
-  return [command, ...args].map(part => (part.includes(' ') ? JSON.stringify(part) : part)).join(' ')
+  // Always quote the executable like JSON.stringify does (the CLI specs pin
+  // the exact rendering); quote remaining arguments only when they carry
+  // spaces, so flags stay greppable in logs.
+  return [JSON.stringify(command), ...args.map(part => (part.includes(' ') ? JSON.stringify(part) : part))].join(' ')
 }
 
 /**
@@ -296,10 +299,6 @@ class SingleExeBuild {
       '--legacy',
       '--prod',
       // Production deployment omits workspace tooling such as Electron's patched signer.
-      // node-linker must be hoisted for the staged payload (sidecar packages such
-      // as @vscode/ripgrep and node-pty must appear at the staging root), but as a
-      // global config it leaves the repo root in hoisted mode and drops
-      // devDependency bin links; restoreRootAfterDeploy() repairs that below.
       '--config.allow-unused-patches=true',
       '--config.node-linker=hoisted',
       '--config.auto-install-peers=false',
@@ -308,15 +307,6 @@ class SingleExeBuild {
     ])
     await this.restoreLegacyHoists()
     await this.materializeStagedLinks()
-    if (!this.cli.dryRun && !process.env.CI) {
-      // pnpm deploy --config.node-linker=hoisted runs a root install that
-      // re-arranges the repo-root node_modules (Packages: -N, devDependency
-      // bin links dropped). Re-link the repo root for local development so
-      // the pkg step and later tooling can resolve devDependencies again;
-      // CI runners are ephemeral and package via the physical store, so they
-      // skip the extra install.
-      await this.runPnpm('restore repo root after deploy', ['install', '--frozen-lockfile', '--ignore-scripts'])
-    }
     if (this.cli.dryRun) {
       for (const name of DEPLOY_ONLY_DOCS) console.log(`build-exe-for-python-sdk: [dry-run] rm -f ${join(this.staging, name)}`)
     } else {
@@ -432,26 +422,6 @@ class SingleExeBuild {
   }
 
   /**
-   * Resolve the @yao-pkg/pkg entrypoint without relying on the repo-root
-   * `.bin` links. `pnpm deploy --prod` leaves the repo root in production
-   * mode: the next pnpm command drops devDependency bin links (Packages: -N),
-   * so `pnpm exec pkg` fails with `Command "pkg" not found`. The physical
-   * store entry survives the deploy, so fall back to it.
-   */
-  private pkgEntrypoint(): string | undefined {
-    // Prefer the physical store entry: the repo-root .bin/pkg is a POSIX shell
-    // shim that cannot be executed with process.execPath, and pnpm deploy
-    // leaves the root in production mode where .bin links are dropped anyway.
-    const store = resolve(root, 'node_modules', '.pnpm')
-    if (!existsSync(store)) return undefined
-    for (const entry of readdirSync(store).filter(name => name.startsWith('@yao-pkg+pkg@')).sort()) {
-      const candidate = join(store, entry, 'node_modules', '@yao-pkg', 'pkg', 'lib-es5', 'bin.js')
-      if (existsSync(candidate)) return candidate
-    }
-    return undefined
-  }
-
-  /**
    * Package one target; SEA mode accepts one target per invocation.
    * @param target - the pkg target triple to build.
    * @returns the executable, resource directories, ripgrep, and required macOS spawn helper paths.
@@ -461,12 +431,9 @@ class SingleExeBuild {
     const product = target.platform === 'win' ? `${productBase}.exe` : productBase
     await this.prepareNativePty(target)
     if (!this.cli.dryRun) await mkdir(this.outDir, { recursive: true })
-    const pkgBin = this.pkgEntrypoint()
-    if (pkgBin === undefined) {
-      throw new Error(`build-exe-for-python-sdk: @yao-pkg/pkg entrypoint not found under ${resolve(root, 'node_modules')}.`)
-    }
-    await this.run(`pkg ${target.spec}`, process.execPath, [
-      pkgBin,
+    await this.runPnpm(`pkg ${target.spec}`, [
+      'exec',
+      'pkg',
       this.staging,
       '--sea',
       '--targets',
@@ -493,7 +460,7 @@ class SingleExeBuild {
     } else {
       const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { version: string }
       await preparePrimaryRuntime({ target: runtimeTarget, output: resources,
-        cache: join(tmpdir(), 'dsh-primary-runtime-downloads'), version, pythonOnly: true })
+        cache: join(tmpdir(), 'dsh-primary-runtime-downloads'), version })
       smokePrimaryRuntime(join(resources, 'primary-runtime'))
     }
     if (target.platform !== 'macos') return [product, ripgrep, office, resources]

@@ -30,13 +30,13 @@
       "path": "../../util/atomic-write"
     },
     {
+      "path": "../../credentials/credentials"
+    },
+    {
       "path": "../../util/brand"
     },
     {
       "path": "../../util/home-paths"
-    },
-    {
-      "path": "../../credentials/credentials"
     },
     {
       "path": "../deepseek-llm-api-extensions"

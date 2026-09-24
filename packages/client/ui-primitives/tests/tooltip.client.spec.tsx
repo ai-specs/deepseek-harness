@@ -39,6 +39,18 @@ afterEach(() => {
 })
 
 describe('Tooltip', () => {
+  it('updates independent keycaps and the accessible combination while visible', () => {
+    const view = render(<Tooltip label="Reload" shortcutKeys={['⌘', 'R']}><button>anchor</button></Tooltip>)
+    fireEvent.focus(screen.getByText('anchor'))
+    expect(Array.from(screen.getByRole('tooltip', { name: 'Reload ⌘ R' }).querySelectorAll('kbd'), key => key.textContent)).toEqual(['⌘', 'R'])
+    view.rerender(<Tooltip label="Reload" shortcutKeys={['Ctrl', '+', 'R']}><button>anchor</button></Tooltip>)
+    expect(Array.from(screen.getByRole('tooltip', { name: 'Reload Ctrl + R' }).querySelectorAll('kbd'), key => key.textContent)).toEqual(['Ctrl', '+', 'R'])
+    view.rerender(<Tooltip label="Reload" shortcutKeys={[]}><button>anchor</button></Tooltip>)
+    expect(screen.getByRole('tooltip').querySelector('kbd')).toBeNull()
+    fireEvent.click(screen.getByText('anchor'))
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
   it('fits from observed sizes without synchronously measuring the bubble', () => {
     automaticResize = false
     const measured = vi.spyOn(Element.prototype, 'getBoundingClientRect')
@@ -304,6 +316,23 @@ describe('Tooltip', () => {
       const bubble = screen.getByRole('tooltip')
       expect(bubble.getAttribute('data-side')).toBe('bottom')
       expect(bubble.style.top).toBe('48px')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it.each(['bottom', 'top'] as const)('uses a custom gap to position and flip a %s tooltip', (side) => {
+    const anchorBottom = side === 'bottom' ? window.innerHeight - 36 : 56
+    const spy = placed(anchorBottom - 20, anchorBottom, 20)
+    try {
+      const view = render(<Tooltip label="Gap" side={side} gap={4}><button type="button">anchor</button></Tooltip>)
+      fireEvent.mouseEnter(screen.getByText('anchor'))
+      const bubble = screen.getByRole('tooltip')
+      expect(bubble.getAttribute('data-side')).toBe(side)
+      expect(bubble.style.top).toBe(`${side === 'bottom' ? anchorBottom + 4 : anchorBottom - 24}px`)
+      view.rerender(<Tooltip label="Gap" side={side} gap={12}><button type="button">anchor</button></Tooltip>)
+      expect(bubble.getAttribute('data-side')).toBe(side === 'bottom' ? 'top' : 'bottom')
+      expect(bubble.style.top).toBe(`${side === 'bottom' ? anchorBottom - 32 : anchorBottom + 12}px`)
     } finally {
       spy.mockRestore()
     }

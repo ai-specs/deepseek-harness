@@ -9,11 +9,11 @@ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import { getOrCreateAnonymousUserId, type AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import { DeepSeekAdapter } from './adapter.ts'
-import { Config, plainOptions, resolveAdapterOptions } from './config.ts'
+import { ConfigWithApiKey, plainOptionsWithApiKey, resolveAdapterOptions } from './config.ts'
 import type { ResolvedDeepSeekOptions } from './config.ts'
 
-export { Config, plainOptions, resolveAdapterOptions, PUBLIC_BASE_URL, MESSAGES_BASE_URL } from './config.ts'
-export type { Options, ResolvedDeepSeekOptions } from './config.ts'
+export { deepSeekConfigFields, Config, ConfigWithApiKey, plainOptions, plainOptionsWithApiKey, resolveAdapterOptions, PUBLIC_BASE_URL, MESSAGES_BASE_URL } from './config.ts'
+export type { Options, OptionsWithApiKey, ResolvedDeepSeekOptions } from './config.ts'
 export {
   DEFAULT_CONTEXT_WINDOW,
   DEFAULT_FILE_EXPIRY_SECONDS,
@@ -28,7 +28,7 @@ export {
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
 } from './defaults.ts'
 export { DeepSeekAdapter } from './adapter.ts'
-export type { DeepSeekAdapterOptions, DeepSeekCatalogModel, DeepSeekConnectionOptions } from './types.ts'
+export type { DeepSeekRequestAuth, DeepSeekAdapterOptions, DeepSeekCatalogModel, DeepSeekConnectionOptions } from './types.ts'
 export {
   DEFAULT_LOW_DETAIL_IMAGE_PIXEL_BUDGET,
   DEFAULT_MAX_IMAGES_PER_REQUEST,
@@ -50,15 +50,18 @@ export { DeepSeekUploadIndex, deepSeekFileScope } from './upload-index.ts'
 export type { DeepSeekUploadRecord } from './upload-index.ts'
 export type { RequestDefaults } from './types.ts'
 
+export { catalogModelInfo } from './model-info.ts'
+export { registerDeepSeekProvider } from './host.ts'
+
 export const name = 'llm-deepseek'
 export const inject = ['llm']
 
 const NS = 'llm-deepseek'
 const PROVIDER = 'deepseek-official'
 
-export function apply(ctx: Context, config: Config): void {
+export function apply(ctx: Context, config: ConfigWithApiKey): void {
   ctx.inject(['settings'], (child) => { child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)) })
-  const options = (): ResolvedDeepSeekOptions => resolveAdapterOptions(plainOptions(config), launchEnvironmentOf(ctx))
+  const options = (): ResolvedDeepSeekOptions => resolveAdapterOptions(plainOptionsWithApiKey(config), launchEnvironmentOf(ctx))
   options()
 
   const resolveApiKey = async (connection: ResolvedDeepSeekOptions): Promise<string> => {
@@ -86,13 +89,19 @@ export function apply(ctx: Context, config: Config): void {
 
   let userId: AnonymousUserId | undefined
   const resolveUserId = (): AnonymousUserId => userId ??= getOrCreateAnonymousUserId()
+  const resolveAuth = async (connection: ResolvedDeepSeekOptions) => {
+    // dsh fork: signed-in product accounts authenticate with the harness token;
+    // the API-key route stays available for deployments without an account.
+    const accountToken = await ctx.get('deepseekAccount')?.resolveToken(connection.baseURL)
+    if (accountToken !== undefined) return { headers: { 'x-dsh-auth-token': accountToken } }
+    return { headers: { 'x-api-key': await resolveApiKey(connection) } }
+  }
   const adapter = new DeepSeekAdapter({
     options,
     onReplayDegrade: ({ provider, model, reason }) => {
       ctx.logger.warn(`llm-deepseek: unusable Messages replay state on assistant history for route "${provider}/${model}"; sending provider-neutral content (${reason})`)
     },
-    resolveApiKey,
-    resolveAccountToken: connection => ctx.get('deepseekAccount')?.resolveToken(connection.baseURL) ?? Promise.resolve(undefined),
+    resolveAuth,
     resolveUserId,
     resolveAttachments: () => ctx.get('attachments'),
     resolveImageAccess: (attachments, ref) => resolveImageAttachmentAccess(

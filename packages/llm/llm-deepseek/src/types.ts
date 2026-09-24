@@ -1,5 +1,5 @@
 /** Model catalog and request-local dependencies for DeepSeek Messages. */
-import type { ModelModality, SystemPromptUpdate, ResolvedRetryPolicy, ImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
+import type { LlmModelInfo, ModelModality, SystemPromptUpdate, ToolUpdate, ResolvedRetryPolicy, ImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import type { AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
@@ -34,6 +34,13 @@ export interface DeepSeekCatalogModel {
    * system prompt; omission means only a leading system message is read.
    */
   systemPromptUpdate?: SystemPromptUpdate
+  /**
+   * `'addition-only'` declares that the endpoint activates a `defer_loading`
+   * tool from a later `tool_addition` block; `'in-history'` additionally
+   * reads removal notices in conversation order. Omission declares the
+   * complete tool list on every request.
+   */
+  toolUpdate?: ToolUpdate
 }
 
 /**
@@ -84,21 +91,28 @@ export interface DeepSeekConnectionOptions {
   retryPolicy: ResolvedRetryPolicy
 }
 
+/** Authentication captured by the provider for one request and its file operations. */
+export interface DeepSeekRequestAuth {
+  /** Credential headers sent unchanged to the resolved endpoint. */
+  headers: Readonly<Record<string, string>>
+  /** Classify a failure using the captured credential; callback failure preserves the original error. */
+  onRequestError?: (error: unknown) => Promise<unknown>
+}
+
 /** Constructor options for {@link DeepSeekAdapter}: the operation-local resolution hooks the plugin owns. */
-export interface DeepSeekAdapterOptions {
+export interface DeepSeekAdapterOptions<Connection extends DeepSeekConnectionOptions = DeepSeekConnectionOptions> {
   /** Report unusable native Messages replay metadata without exposing content or signatures. */
   onReplayDegrade?: (detail: { provider: string; model: string; reason: string }) => void
+  /** Report extension fields omitted from one request because the merged request failed to serialize. */
+  onExtensionsOmitted?: (detail: { provider: string; model: string; fields: readonly string[]; error: unknown }) => void
+  /** Provider label for selectors; omission uses the protocol family name. */
+  providerName?: string
+  /** Provider-owned catalog availability; omission exposes no discovery entries. */
+  discoverModels?: (provider: string) => Promise<LlmModelInfo[]>
   /** Current validated connection facts; called once per operation. */
-  options: () => DeepSeekConnectionOptions
-  /**
-   * Resolve the API key for the connection facts of one request. The
-   * snapshot is passed in — never re-read — so the key can only ever come
-   * from the same resolution as the endpoint it is sent to. Throws `LlmError`
-   * `MISSING_CREDENTIAL` when no key is available anywhere.
-   */
-  resolveApiKey: (connection: DeepSeekConnectionOptions) => Promise<string>
-  /** Resolve a DSH account token only for an eligible official endpoint. */
-  resolveAccountToken?: (connection: DeepSeekConnectionOptions) => Promise<string | undefined>
+  options: () => Connection
+  /** Resolve authentication from this request's connection snapshot; never re-read the endpoint. */
+  resolveAuth: (connection: Connection) => Promise<DeepSeekRequestAuth>
   /** Resolve the harness-home anonymous id shared with telemetry and feedback. */
   resolveUserId: () => AnonymousUserId
   /** Resolve the current durable attachment service; absence rejects image input. */
