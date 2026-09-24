@@ -4,11 +4,8 @@
  * @module @deepseek-ai/dsh-plugin-kestra-sync
  */
 
-import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
-import { pathToFileURL, fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 import { type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -80,304 +77,6 @@ export { PkceTokenProvider, codeChallenge, buildAuthorizeUrl } from './pkce.ts'
 
 export type { SessionSnapshot, RemoteInput }
 
-/** Absolute file URL of a sibling integration package's entry (built lib, else workspace source). */
-function siblingModuleUrl(packageName: string): string {
-  // Walk up from this file so the lookup works whether running from src/, bin/ or the built lib/.
-  let dir = fileURLToPath(new URL('.', import.meta.url))
-  for (; ;) {
-    const candidate = join(dir, packageName)
-    const built = join(candidate, 'lib', 'index.js')
-    if (existsSync(built)) return pathToFileURL(built).href
-    const source = join(candidate, 'src', 'index.ts')
-    if (existsSync(source)) return pathToFileURL(source).href
-    const parent = dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-  throw new Error(`plugin-kestra-sync: sibling package '${packageName}' not found from ${import.meta.url}`)
-}
-
-/** Walk up from a directory to the dsh workspace root that carries apps/cli. */
-function workspaceRoot(startDir: string): string | undefined {
-  let dir = resolve(startDir)
-  for (;; dir = dirname(dir)) {
-    if (existsSync(join(dir, 'apps', 'cli', 'src', 'bin.ts'))) return dir
-    const parent = dirname(dir)
-    if (parent === dir) return undefined
-  }
-}
-
-/**
- * 异步跑子进程并回收输出（spawnSync 的非阻塞替代）：超时先 SIGTERM、5s 后升级
- * SIGKILL；超时/派生失败时 status=null 并带 error，由调用方按原 spawnSync 语义
- * 归一退出码（spawnSync 的 timeout 同样给 status=null + error）。
- */
-function runChild(
-  command: string,
-  args: string[],
-  options: { env: NodeJS.ProcessEnv; timeoutMs: number; cwd?: string },
-): Promise<{ status: number | null; stdout: string; stderr: string; error: Error | undefined }> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { env: options.env, cwd: options.cwd })
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-    let timedOut = false
-    let killTimer: NodeJS.Timeout | undefined
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGTERM')
-      killTimer = setTimeout(() => child.kill('SIGKILL'), 5_000)
-    }, options.timeoutMs)
-    const finish = (status: number | null, error?: Error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      if (killTimer !== undefined) clearTimeout(killTimer)
-      resolve({ status, stdout, stderr, error })
-    }
-    child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
-    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
-    child.on('error', err => finish(null, err))
-    child.on('close', code => finish(timedOut ? null : code, timedOut ? new Error('ETIMEDOUT') : undefined))
-  })
-}
-
-/**
- * Relay overlay 的模型取值（裁定版风险 #2 收口）：env 显式覆盖 > PC 当前默认选择
- * （agentDefaultModel.currentSelection()，含 settings user layer）> 历史默认。
- * 生成时写死具体值后，子进程 overlay base == PC 解析值——user layer 覆盖不再造成
- * 「PC 接力用旧值 / Kestra 执行面用 env 值」的两端分叉。
- */
-export function resolveRelayModel(
-  env: { DSH_PROVIDER?: string | undefined; DSH_MODEL?: string | undefined },
-  selection?: { provider: string; model: string } | undefined,
-): { provider: string; model: string } {
-  return {
-    provider: env.DSH_PROVIDER ?? selection?.provider ?? 'deepseek-official',
-    model: env.DSH_MODEL ?? selection?.model ?? 'deepseek-v4-flash',
-  }
-}
-
-/**
- * Run one remote input as a headless dsh child (dsh.docx: 会话执行权在 dsh(PC)——
- * 手机输入被 PC 消费后由 PC 接力执行). Session phases are pushed around the child:
- * RUNNING on spawn, COMPLETED/FAILED with the final answer on exit. A terminal
- * parent session forks a new session (state machine has no terminal→running edge).
- */
-async function executeRemoteInput(
-  client: KestraSessionSyncClient,
-  input: RemoteInput,
-  options: {
-    timeoutSeconds: number
-    selection?: (() => { provider: string; model: string } | undefined) | undefined
-    getPhase?: (sessionId: string) => string | undefined
-    /** 查询手机端 sessionId 对应的 headless 内部 sessionId（用于 --session-id 续会话）。 */
-    getHeadlessSessionId?: (sessionId: string) => string | undefined
-    getWorkspace?: (workspaceId: string) => {
-      workspaceId: string
-      title: string
-      path: string
-      attachSession(sessionId: string): Promise<void>
-    } | undefined
-  },
-  onExecuted?: (info: {
-    sessionId: string
-    phase: string
-    prompt: string
-    result?: string
-    parentSessionId?: string
-    headlessSessionId?: string
-    workspace?: { workspaceId: string; title: string }
-  }) => void,
-): Promise<void> {
-  // 选项 B：SSE newSession=true（手机端发起全新会话）——手机端携带 sessionId 时
-  // 直接采纳（方案 C 2026-09-15：新会话 id 由手机端生成、PC 接受——发送即关联，
-  // 手机端无需靠列表匹配回学 id）；未携带（兼容旧端/未发送队列老数据）回退 PC
-  // 派生新 id。追问（newSession=false）一律 resume 原手机端 sessionId，不 fork——
-  // 通过 --session-id 把消息追加到 headless 内部会话，AI 能看到历史上下文。
-  const target = input.newSession === true
-    ? (input.sessionId
-      ? { kind: 'resume' as const, sessionId: input.sessionId }
-      : { kind: 'fork' as const, sessionId: input.sessionId, newSessionId: randomUUID() })
-    : { kind: 'resume' as const, sessionId: input.sessionId }
-  const sessionId = target.kind === 'fork' ? target.newSessionId : input.sessionId
-  // resume 已有会话时，查 headless 内部 sessionId，传给 --session-id 让模型续上下文。
-  const resumeHeadlessId = target.kind === 'resume'
-    ? options.getHeadlessSessionId?.(input.sessionId ?? '')
-    : undefined
-  const workspace = input.newSession === true && input.workspaceId
-    ? options.getWorkspace?.(input.workspaceId)
-    : undefined
-  if (input.newSession === true && input.workspaceId && workspace === undefined) {
-    onExecuted?.({
-      sessionId,
-      phase: 'failed',
-      prompt: input.text,
-      result: `工作区不可用：${input.workspaceId}`,
-    })
-    return
-  }
-
-  const state: Record<string, unknown> = {
-    prompt: input.text,
-    source: 'dsh-ui-remote-input',
-    remoteInputAt: input.at,
-    timeline: { running: new Date().toISOString() },
-  }
-  if (target.kind === 'fork') {
-    state.parentSessionId = input.sessionId
-    state.forkedFrom = 'COMPLETED/FAILED 会话的手机端输入派生新会话'
-  }
-  // 选项 B：会话数据权威在 PC 本地，不写中台（A 组件 dsh_session 已退役）。
-
-  // Generated overlay: model config + kestra-run observer for the result contract.
-  // Deliberately WITHOUT kestra-sync — the parent (this plugin) owns Kestra pushes,
-  // so the child cannot recurse into input polling. 模型为生成时写死的具体值
-  // （见 resolveRelayModel），不再用 env 表达式——避免子进程 settings user layer
-  // 压过 overlay base 造成两端模型分叉。
-  const { provider, model } = resolveRelayModel(process.env, options.selection?.())
-  process.stderr.write(`[kestra-sync] remote input model=${provider}/${model}\n`)
-  const overlay = [
-    '# Generated by plugin-kestra-sync remote-input handler.',
-    '- id: agent-default-model',
-    '  config:',
-    `    provider: ${JSON.stringify(provider)}`,
-    `    model: ${JSON.stringify(model)}`,
-    '',
-    '- insert:',
-    '    - id: kestra-run',
-    `      name: '${siblingModuleUrl('plugin-kestra-run')}'`,
-    '      config:',
-    '        resultFile: !!js process.env.DSH_OUTPUT_FILE',
-    '        timeoutSeconds: !!js Number(process.env.DSH_TIMEOUT) || 0',
-    '',
-  ].join('\n')
-
-  const tempDir = mkdtempSync(join(tmpdir(), 'dsh-remote-input-'))
-  const overlayPath = join(tempDir, 'dsh-remote.overlay.yml')
-  const resultFile = join(tempDir, 'result.json')
-  writeFileSync(overlayPath, overlay)
-
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    DSH_PROMPT: input.text,
-    DSH_OUTPUT_FILE: resultFile,
-    DSH_TIMEOUT: String(options.timeoutSeconds * 1000),
-  }
-
-  const startedAt = Date.now()
-  let headlessSessionId: string | undefined
-  try {
-    const root = workspaceRoot(fileURLToPath(new URL('..', import.meta.url)))
-    const headlessArgs = [
-      '--profile', 'headless',
-      '--patch', overlayPath,
-      '--json',
-      ...(resumeHeadlessId ? ['--session-id', resumeHeadlessId] : []),
-      input.text,
-    ]
-    // 执行一次 headless，返回 {exitCode, stdout, stderr}
-    const runOnce = async (): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
-      if (root !== undefined) {
-        const builtCli = join(root, 'apps', 'cli', 'lib', 'bin.js')
-        const result = await runChild(process.execPath,
-          existsSync(builtCli)
-            ? [builtCli, ...headlessArgs]
-            : ['--import', join(root, 'node_modules', 'tsx', 'dist', 'esm', 'index.mjs'), join(root, 'apps', 'cli', 'src', 'bin.ts'), ...headlessArgs],
-          { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000, ...(workspace === undefined ? {} : { cwd: workspace.path }) })
-        return { exitCode: result.status ?? (result.error ? 1 : 0), stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? '') }
-      }
-      const result = await runChild('dsh', headlessArgs,
-        { env, timeoutMs: options.timeoutSeconds * 1000 + 30_000, ...(workspace === undefined ? {} : { cwd: workspace.path }) })
-      return { exitCode: result.status ?? 1, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? '') }
-    }
-
-    let run = await runOnce()
-    // session 写句柄未释放时（进程已退出但锁文件残留），删锁后重试
-    if (run.exitCode !== 0 && (run.stderr + run.stdout).includes('already owned')) {
-      process.stderr.write('[kestra-sync] session lock busy, clearing lock and retrying...\n')
-      if (resumeHeadlessId) {
-        try {
-          const sessionsRoot = join(homedir(), '.dsh', 'sessions')
-          for (const sub of readdirSync(sessionsRoot)) {
-            const lockPath = join(sessionsRoot, sub, resumeHeadlessId, 'session.lock')
-            try {
-              unlinkSync(lockPath)
-              process.stderr.write(`[kestra-sync] removed stale lock: ${lockPath}\n`)
-            } catch { /* 锁文件不存在则忽略 */ }
-          }
-        } catch (e) {
-          process.stderr.write(`[kestra-sync] failed to clear lock: ${String(e)}\n`)
-        }
-      }
-      await new Promise(r => setTimeout(r, 1000))
-      run = await runOnce()
-    }
-    const exitCode = run.exitCode
-    const stdout = run.stdout
-    const stderr = run.stderr
-    process.stderr.write(`[kestra-sync] DIAG stdout head: ${stdout.slice(0, 200).replace(/\n/g, '\\n')}\n`)
-    const firstLine = stdout.split('\n').find(l => l.trim().startsWith('{'))
-    if (firstLine) {
-      try {
-        const evt = JSON.parse(firstLine)
-        if (evt && evt.type === 'session' && typeof evt.sessionId === 'string') {
-          headlessSessionId = evt.sessionId
-        }
-      } catch { /* 忽略解析错误 */ }
-    }
-    if (exitCode !== 0) {
-      process.stderr.write(`[kestra-sync] remote input run exit=${exitCode}: `
-        + `${stderr.slice(-600)}${stdout.slice(-200)}\n`)
-    }
-
-    let answer = ''
-    try {
-      const parsed = JSON.parse(readFileSync(resultFile, 'utf8')) as { result?: string; answer?: string }
-      answer = parsed.result ?? parsed.answer ?? ''
-    } catch { /* 无结果文件（超时/崩溃）—— 状态照常落地，供手机端可见 */ }
-
-    process.stderr.write(`[kestra-sync] remote input executed: session=${sessionId} exit=${exitCode}\n`)
-    if (headlessSessionId && workspace) await workspace.attachSession(headlessSessionId)
-    // 选项 B 查询面：headless 派生会话的结果写入本地索引（web 观测不到子进程事件）。
-    onExecuted?.({
-      sessionId,
-      phase: exitCode === 0 ? 'completed' : 'failed',
-      prompt: input.text,
-      ...(answer === '' ? {} : { result: answer }),
-      ...(target.kind === 'fork' && input.sessionId !== undefined && input.sessionId !== '' ? { parentSessionId: input.sessionId } : {}),
-      ...(headlessSessionId ? { headlessSessionId } : {}),
-      ...(workspace === undefined ? {} : { workspace: { workspaceId: workspace.workspaceId, title: workspace.title } }),
-    })
-    // §3.3 指标事件：会话终态旁路上报（轻量聚合，不含会话全文）
-    void client.reportMetric({
-      type: 'session_end',
-      sessionId,
-      outcome: exitCode === 0 ? 'completed' : 'failed',
-      durationMs: Date.now() - startedAt,
-    })
-  } catch (e) {
-    // 兜底：执行器本身抛错也要把会话落到 FAILED 并留日志（选项 B 不写中台；
-    // 会话状态在 SessionIndex/PC 本地，由 onExecuted 通知查询面）。
-    process.stderr.write(`[kestra-sync] remote input failed: session=${sessionId} error=${String(e)}\n`)
-    onExecuted?.({
-      sessionId,
-      phase: 'failed',
-      prompt: input.text,
-      ...(String(e) === '' ? {} : { result: `执行失败：${String(e).slice(0, 200)}` }),
-    })
-    void client.reportMetric({
-      type: 'session_end',
-      sessionId,
-      outcome: 'failed',
-      durationMs: Date.now() - startedAt,
-    })
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true })
-  }
-}
-
 /**
  * agentDefaultModel 服务的最小结构（@deepseek-ai/dsh-agent-default-model，web-app
  * bundle 内置）。按结构类型访问而不 import 该包——插件包独立构建（rootDir=src），
@@ -393,7 +92,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
   ctx.provide('kestraSync', client)
 
   // 模型选择读取（裁定版风险 #2 收口）：relay overlay 生成时读 PC 当前默认选择写死。
-  // 按调用时同步解析（与 headless/webhook 消费同姿势）；服务不可见时回落
+  // 按调用时同步解析；服务不可见时回落
   // env/历史默认——每条路径都有日志可观测。
   const getModelService = (): AgentDefaultModelLike | undefined =>
     ctx.get('agentDefaultModel') as AgentDefaultModelLike | undefined
@@ -429,30 +128,11 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
     }
   }
 
-  const selection = (): { provider: string; model: string } | undefined => {
-    const cur = getModelService()?.currentSelection()
-    return cur === undefined ? undefined : { provider: cur.provider, model: cur.model }
-  }
-
   // 指令接收（选项 B 主链路）：SSE 与轮询共用同一链式执行入口（同一时刻至多一个
-  // headless 子进程），但二选一运行——SSE 开启（默认）时不再轮询，避免双通道
-  // 重复执行；useSse=false 时回退轮询（S1 双通道去重：汇聚同一 executeRemoteInput）。
+  // live agent 回合），但二选一运行——SSE 开启（默认）时不再轮询，避免双通道
+  // 重复执行；useSse=false 时回退轮询（S1 双通道去重）。
   const chain: { p: Promise<void> } = { p: Promise.resolve() }
   const index = new SessionIndex(config.sessionIndexPath ?? join(homedir(), '.dsh', 'kestra-session-index.json'))
-  // 手机端 sessionId → headless 内部 sessionId 映射（追问时传 --session-id 续会话）。
-  const headlessSessionMap = new Map<string, string>()
-  const recordExecuted = (info: {
-    sessionId: string
-    phase: string
-    prompt: string
-    result?: string
-    parentSessionId?: string
-    headlessSessionId?: string
-    workspace?: { workspaceId: string; title: string }
-  }): void => {
-    index.record(info)
-    if (info.headlessSessionId) headlessSessionMap.set(info.sessionId, info.headlessSessionId)
-  }
   const workspaceRegistry = (ctx as Context & {
     workspaceRegistry: {
       get(id: string): {
@@ -471,15 +151,6 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       }>
     }
   }).workspaceRegistry
-  const getWorkspace = (workspaceId: string) => {
-    const workspace = workspaceRegistry.get(workspaceId)
-    return workspace === undefined ? undefined : {
-      workspaceId: String(workspace.id),
-      title: workspace.title,
-      path: workspace.path,
-      attachSession: async (sessionId: string) => { await workspace.attachSession(sessionId) },
-    }
-  }
 
   /**
    * 方案 A（统一执行面）：手机 relay 输入在 PC web 进程内以 live Agent 执行——
@@ -487,7 +158,8 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
    * sessionId，两端同 id、PC 为权威），再 `prompt` 驱动；追问 resume 同一实体。
    * 会话因此进入 PC 原生会话体系（PC UI 列表可见、live agent 可保持续上下文、
    * `session/title` 权威标题回填 SessionIndex——手机端标题 = PC 权威）。
-   * 返回 false 表示 live agent 不可用/创建失败，由调用方回退 headless 子进程保底。
+   * 本函数是手机 relay 输入的**唯一执行面**（2026-09-24 退役 headless 保底）：
+   * live agent 不可用/创建失败一律记录 failed 终态，不再回退子进程。
    */
   const executeOnLiveAgent = async (
     input: RemoteInput,
@@ -522,12 +194,28 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
         }, signal: AbortSignal): Promise<{ accepted: true }>
       }
     }
-    if (host.agents === undefined || host.sessionController === undefined) return false
-    // SessionIndex 主键恒为手机端稳定 sessionId（手机查询面）；pcSessionId 只用于
-    // PC 侧会话实体（新会话=手机 sessionId；旧数据兼容=headlessSessionId）。
     const recordSessionId = input.sessionId ?? pcSessionId
-
     const startedAt = Date.now()
+    if (host.agents === undefined || host.sessionController === undefined) {
+      // PC 只支持 web 形态（daemon/headless 挂载已退役）：live agent 缺失即执行失败。
+      process.stderr.write('[kestra-sync] live PC agent unavailable (agents/sessionController not provided)\n')
+      index.record({
+        sessionId: recordSessionId,
+        phase: 'failed',
+        prompt: input.text,
+        result: '执行失败：PC web 进程未提供 live agent 能力',
+      })
+      void client.reportMetric({
+        type: 'session_end',
+        sessionId: recordSessionId,
+        outcome: 'failed',
+        durationMs: Date.now() - startedAt,
+      })
+      return true
+    }
+    // SessionIndex 主键恒为手机端稳定 sessionId（手机查询面）；pcSessionId 即手机
+    // sessionId（方案 A：会话实体双端同 id，无孪生映射）。
+
     process.stderr.write(`[kestra-sync] remote input using live PC agent: session=${input.sessionId} pc=${pcSessionId} new=${options.isNewSession === true}\n`)
     try {
       // 新会话：先 create（幂等 adopt，会话实体 id=手机 sessionId，cwd 由 workspace/defaultCwd 决定）。
@@ -539,9 +227,22 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
             ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }),
           })
         } catch (createError) {
-          // 创建失败（如 workspace not found）→ 回退 headless 子进程兜底（老行为保留）。
-          process.stderr.write(`[kestra-sync] live PC agent create failed, falling back: session=${input.sessionId} error=${String(createError)}\n`)
-          return false
+          // 创建失败（如 workspace not found）即执行失败：live agent 是唯一执行面，
+          // 不再回退 headless 子进程（2026-09-24 退役）。
+          process.stderr.write(`[kestra-sync] live PC agent create failed: session=${input.sessionId} error=${String(createError)}\n`)
+          index.record({
+            sessionId: recordSessionId,
+            phase: 'failed',
+            prompt: input.text,
+            result: `执行失败：会话创建失败 ${String(createError).slice(0, 200)}`,
+          })
+          void client.reportMetric({
+            type: 'session_end',
+            sessionId: recordSessionId,
+            outcome: 'failed',
+            durationMs: Date.now() - startedAt,
+          })
+          return true
         }
       }
       await host.sessionController.prompt({
@@ -629,36 +330,13 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
     chain.p = chain.p
       .then(() => {
         applyEnvOverrideOnce()
-        const persistedHeadlessId = input.sessionId === undefined ? undefined : (
-          headlessSessionMap.get(input.sessionId)
-          ?? (index.get(input.sessionId) as { state?: { headlessSessionId?: string } } | undefined)?.state?.headlessSessionId
-        )
-        // 方案 A（统一执行面）：新会话/无 headless 映射的追问 → PC web live agent
-        // （会话实体=手机 sessionId：PC UI 可见、live agent 保持续上下文、权威标题
-        // 回填；追问 resume 同一实体）。旧数据（headlessSessionId 映射）追问 → 兼容
-        // resume 既有 headless 会话实体。live agent 不可用/创建失败 → 回退 headless
-        // 子进程保底（老行为）。
-        const pcSessionId = input.sessionId ?? randomUUID()
-        const useLegacyHeadless = input.newSession !== true && persistedHeadlessId !== undefined
-        return executeOnLiveAgent(input, useLegacyHeadless ? persistedHeadlessId : pcSessionId, {
+        // 方案 A（统一执行面，2026-09-24 完全退役 headless 保底）：手机 relay 输入
+        // 一律走 PC web 进程内 live agent——会话实体=手机 sessionId（PC UI 可见、
+        // live agent 保持续上下文、权威标题回填；追问 resume 同一实体）。不再有
+        // headless 子进程回退：live agent 不可用/创建失败即执行失败（记录 failed 终态）。
+        void executeOnLiveAgent(input, input.sessionId ?? randomUUID(), {
           isNewSession: input.newSession === true,
-          ...(useLegacyHeadless || input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
-        }).then((handled) => {
-          if (handled) return
-          return executeRemoteInput(client, input, {
-            timeoutSeconds: config.remoteInputTimeoutSeconds ?? 300,
-            selection,
-            // 追问的父会话 phase 从本地索引读取（会话数据权威在 PC）。
-            getPhase: sessionId => String(index.get(sessionId)?.phase ?? '') || undefined,
-            // 查手机端 sessionId 对应的 headless 内部 sessionId（内存优先，回落持久化索引）。
-            getHeadlessSessionId: (sessionId) => {
-              const mem = headlessSessionMap.get(sessionId)
-              if (mem) return mem
-              const persisted = (index.get(sessionId) as { state?: { headlessSessionId?: string } } | undefined)?.state?.headlessSessionId
-              return typeof persisted === 'string' && persisted ? persisted : undefined
-            },
-            getWorkspace,
-          }, recordExecuted)
+          ...(input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
         })
       })
       .catch(() => {})
@@ -667,7 +345,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
 
   // 本地会话索引（选项 B 查询面）：应答中台转发的 session.query（列表/详情）。
   // 会话数据权威在 PC 本地；快照持久化（~/.dsh/kestra-session-index.json）保证
-  // PC 重启后 headless 派生会话仍可被手机端查到（web 会话另经恢复通告重建，幂等）。
+  // PC 重启后会话仍可被手机端查到（live 会话另经恢复通告重建，幂等）。
   const workspaceForSession = (sessionId: string): { workspaceId: string; title: string } | undefined => {
     const workspace = workspaceRegistry.list().find(item => item.sessionIds.some(id => String(id) === sessionId))
     return workspace === undefined ? undefined : { workspaceId: String(workspace.id), title: workspace.title }
@@ -732,5 +410,3 @@ export function apply(ctx: Context, config: Config): KestraSessionSyncClient | u
   }
   return mountClient(ctx, config, new KestraSessionSyncClient(config))
 }
-
-export { executeRemoteInput }

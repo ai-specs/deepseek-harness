@@ -744,7 +744,7 @@ export class SessionIndex {
     this.flushTimer = setInterval(() => this.flush(), 2000)
   }
 
-  /** 启动恢复：从快照文件重建索引（PC 重启后 headless 派生会话仍可见）。 */
+  /** 启动恢复：从快照文件重建索引（PC 重启后会话仍可见）。 */
   private load(): void {
     try {
       const raw = readFileSync(this.filePath as string, 'utf8')
@@ -798,7 +798,7 @@ export class SessionIndex {
     const phase = deriveSessionPhaseFromLog(events) ?? 'running'
     const derived = session.deriveMessages?.() ?? []
     const prev = this.sessions.get(sessionId)
-    // 消息轮次的权威投影：与 record（headless 终态）共用 deriveHistory，保证
+    // 消息轮次的权威投影：与 record 共用 deriveHistory，保证
     // PC web 直发会话（upsert 路径）的 state.history 也被投影——手机端
     // session.messages 只读 state.history，此前 upsert 仅折叠 prompt/result、
     // 不写 history，导致 web 直发会话详情永远返回空。观测窗口消息未就绪时
@@ -834,14 +834,8 @@ export class SessionIndex {
    * （含聊天记录全文）——记录由手机进入详情后经 session.messages 按游标增量读取。
    */
   list(since?: string): Array<Record<string, unknown>> {
-    const aliasedHeadlessIds = new Set(
-      [...this.sessions.values()]
-        .map(session => session.state?.headlessSessionId)
-        .filter((id): id is string => typeof id === 'string' && id !== '')
-        .map(id => wireSessionId(id) ?? id),
-    )
+    // 方案 A：索引主键即手机/PC 双端一致的 sessionId，无孪生别名（headless 已退役）。
     return [...this.sessions.values()]
-      .filter(session => !aliasedHeadlessIds.has(session.sessionId))
       .filter(session => since === undefined || since === '' || session.updatedAt > since)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map((s) => {
@@ -890,8 +884,8 @@ export class SessionIndex {
   }
 
   /**
-   * 记录 headless 执行结果（远程指令派生会话的事件在子进程内，web 观测不到，
-   * 由 executeRemoteInput 终态回调写入本索引）。同 id 时以最新结果覆盖并保留既有 state。
+   * 记录远程输入执行结果（live agent 轮次由插件回调写入本索引，同 id 以最新结果
+   * 覆盖并保留既有 state）。
    */
   record(info: {
     sessionId: string
@@ -899,7 +893,6 @@ export class SessionIndex {
     prompt: string
     result?: string
     parentSessionId?: string
-    headlessSessionId?: string
     workspace?: { workspaceId: string; title: string }
     /** PC agent 会话派生的完整轮次（含 web 直发轮）：非空时作为权威历史取代旧累计。 */
     derivedHistory?: Array<{ role: 'user' | 'assistant'; text: string }>
@@ -946,7 +939,6 @@ export class SessionIndex {
         prompt: info.prompt,
         ...(info.result === undefined ? {} : { result: info.result }),
         ...(info.parentSessionId === undefined ? {} : { parentSessionId: info.parentSessionId }),
-        ...(info.headlessSessionId === undefined ? {} : { headlessSessionId: info.headlessSessionId }),
       },
     })
     this.scheduleFlush()
