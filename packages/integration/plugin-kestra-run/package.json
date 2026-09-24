@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-plugin-kestra-run",
   "description": "dsh headless one-shot observer (PC 端 remote-input 派生会话): env-driven model/tool selection, tool allowlist guard, and the structured result contract for kestra-sync reporting",
-  "version": "0.1.7-alpha.2",
+  "version": "0.1.7-rc.2",
   "type": "module",
   "bin": {
     "dsh-run": "bin/dsh-run.mjs"
