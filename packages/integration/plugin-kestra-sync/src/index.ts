@@ -128,9 +128,9 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
     }
   }
 
-  // 指令接收（选项 B 主链路）：SSE 与轮询共用同一链式执行入口（同一时刻至多一个
-  // live agent 回合），但二选一运行——SSE 开启（默认）时不再轮询，避免双通道
-  // 重复执行；useSse=false 时回退轮询（S1 双通道去重）。
+  // 指令接收（选项 B 主链路）：链式执行入口保证同一时刻至多一个 live agent 回合。
+  // SSE 开启（默认）时经 startInputSse 实时接收；useSse=false 时 PC 不接入中台
+  // （轮询降级已随选项 A 退役）。
   const chain: { p: Promise<void> } = { p: Promise.resolve() }
   const index = new SessionIndex(config.sessionIndexPath ?? join(homedir(), '.dsh', 'kestra-session-index.json'))
   const workspaceRegistry = (ctx as Context & {
