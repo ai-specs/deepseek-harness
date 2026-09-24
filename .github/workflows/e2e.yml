@@ -130,6 +130,9 @@ jobs:
           DEEPSEEK_MESSAGES_BASE_URL: ${{ vars.DEEPSEEK_MESSAGES_BASE_URL || 'https://dashscope.aliyuncs.com/apps/anthropic' }}
           # dsh fork: model name matches the DashScope deployment (.env DEEPSEEK_MODEL_NAME).
           DEEPSEEK_MODEL_NAME: ${{ vars.DEEPSEEK_MODEL_NAME || 'deepseek-v4-flash' }}
+          # dsh fork: upstream suites read MODEL_NAME (not DEEPSEEK_MODEL_NAME) for
+          # their llm config; the DashScope Messages endpoint only knows the fork model.
+          MODEL_NAME: ${{ vars.DEEPSEEK_MODEL_NAME || 'deepseek-v4-flash' }}
           # dsh fork: DashScope deepseek-v4-flash does not reproduce the upstream
           # model's voluntary sandbox-escalation behavior (escalation.e2e.ts gates on this).
           DSH_E2E_SKIP_MODEL_BEHAVIOR: '1'
