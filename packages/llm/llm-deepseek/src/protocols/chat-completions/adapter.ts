@@ -256,6 +256,11 @@ export class ChatCompletionsAdapter extends LlmAdapter {
   ): AsyncIterable<StreamChunk> {
     const headers = {
       ...auth.headers,
+      // dsh fork: the chat-completions endpoint authenticates with a bearer
+      // token; account-route auth (x-dsh-auth-token) is forwarded as-is.
+      ...(auth.headers['x-api-key'] !== undefined
+        ? { 'authorization': `Bearer ${auth.headers['x-api-key']}` }
+        : {}),
       'content-type': 'application/json',
       'accept': 'text/event-stream',
       ...attributionHeaders(),
