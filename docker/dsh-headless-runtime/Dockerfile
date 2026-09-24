@@ -3,7 +3,7 @@
 # 目的：替代自研 io.kestra.plugin.dsh.agent.AIAgent（dsh-in-docker 执行面），
 # 由 Kestra plugin-docker cli.Run 直接运行上游 npm 分发的 dsh（OpenAI 兼容协议）。
 #
-# 镜像 tag 约定：与上游 dsh npm 包版本一致（如 0.1.7-alpha.2），由 CI
+# 镜像 tag 约定：与上游 dsh npm 包版本一致（如 0.1.7-rc.1），由 CI
 # （.github/workflows/publish-dsh-headless-runtime.yml）构建推送到
 # ghcr.io/ai-specs/dsh-headless-runtime:<version>；本地构建：
 #   docker build -t dsh-headless-runtime:<version> docker/dsh-headless-runtime
@@ -11,8 +11,8 @@
 # ============================================================
 # 【版本升级义务 —— 下次 AI 必读】
 # 本镜像发布"上游 @deepseek-ai/dsh"的 npm 包，与 fork 自身版本号（本仓库
-# package.json / 0.1.7-alpha.2 线）不一定同步：fork merge 上游 release 后，
-# 若上游已发布新 alpha（dist-tags.alpha），本镜像默认版本就是过期的。
+# package.json / 0.1.7-rc.1 线）不一定同步：fork merge 上游 release 后，
+# 若上游已发布新版本（dist-tags.alpha / next / latest），本镜像默认版本就是过期的。
 #
 # 升级判断（无需人工猜测，两条命令即可）：
 #   1) npm view @deepseek-ai/dsh dist-tags --json   # 读 dist-tags.alpha
@@ -27,7 +27,9 @@
 #   4) 本地验证：docker build -t dsh-headless-runtime:<新版本> 该目录，
 #      并确认 dsh --version 输出与版本一致。
 #
-# 当前已发布基线：0.1.7-alpha.2（对应上游 2026-09-23 release）。
+# 当前已发布基线：0.1.7-rc.1（上游 dist-tags.next，2026-09-24 发布；
+# dist-tags.latest=0.1.5-rc.3 是稳定线，alpha=0.1.7-alpha.2 已被 next 取代）。
+# 升级判断：npm view @deepseek-ai/dsh dist-tags --json 取 dist-tags.next。
 # ============================================================
 #
 # 用法（Kestra flow 或手动）：
@@ -35,7 +37,7 @@
 #     -e DEEPSEEK_API_KEY=... \
 #     -e DEEPSEEK_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1 \
 #     -e DEEPSEEK_MODEL_NAME=deepseek-v4-flash \
-#     dsh-headless-runtime:0.1.7-alpha.2 \
+#     dsh-headless-runtime:0.1.7-rc.1 \
 #     --profile headless "用一句话回答：1+1等于几？"
 #
 # 说明：
@@ -47,7 +49,7 @@
 #   与项目 .env 的 DEEPSEEK_* 三变量直接对齐。
 # - node-pty 原生模块在 glibc 镜像（node:22-slim）有 prebuild，alpine/musl 没有。
 
-ARG DSH_VERSION=0.1.7-alpha.2
+ARG DSH_VERSION=0.1.7-rc.1
 
 FROM node:22-slim
 
