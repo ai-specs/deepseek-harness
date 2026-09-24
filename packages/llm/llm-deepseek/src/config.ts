@@ -333,6 +333,10 @@ export function resolveAdapterOptions(config: OptionsWithApiKey, environment?: L
   }
   const baseURL = config.baseURL
     ?? environment?.get(config.protocol === 'messages' ? MESSAGES_BASE_URL_ENV : BASE_URL_ENV)?.value
+    // dsh fork: the Python SDK and upstream callers inject only DEEPSEEK_BASE_URL;
+    // fall back to it for messages so a single-endpoint caller still reaches its
+    // mock/provider root. An explicit DEEPSEEK_MESSAGES_BASE_URL still wins.
+    ?? environment?.get(BASE_URL_ENV)?.value
     ?? (config.protocol === 'messages' ? MESSAGES_BASE_URL : PUBLIC_BASE_URL)
   const parsed = new URL(baseURL)
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {

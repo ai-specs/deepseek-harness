@@ -32,11 +32,11 @@ import type {
   DeepSeekLlmApiJson,
 } from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import { serializeRequest, serializeRequestWithImages } from './serialize.ts'
-import { deepSeekImageRequestPricing, resolveRequestImageTarget } from '../../common/request-pricing.ts'
-import { catalogModelInfo, modelInfo } from '../../common/model-info.ts'
-import type { DeepSeekAdapterOptions, DeepSeekCatalogModel, DeepSeekConnectionOptions } from '../../common/types.ts'
-import type { DeepSeekFileStore } from '../../common/file-store.ts'
-import { FileResolutionFailure, RequestFiles } from '../../common/request-files.ts'
+import { deepSeekImageRequestPricing, resolveRequestImageTarget } from '../../request-pricing.ts'
+import { catalogModelInfo, modelInfo } from '../../model-info.ts'
+import type { DeepSeekAdapterOptions, DeepSeekCatalogModel, DeepSeekConnectionOptions, DeepSeekRequestAuth } from '../../types.ts'
+import type { DeepSeekFileStore } from '../../file-store.ts'
+import { FileResolutionFailure, RequestFiles } from '../../request-files.ts'
 import { prepareRequestExtensions } from '../../common/request-extensions.ts'
 import { parseSse } from './sse.ts'
 import { translate } from './translate.ts'
@@ -194,7 +194,7 @@ export class ChatCompletionsAdapter extends LlmAdapter {
         )
       }
     }
-    const apiKey = await this.config.resolveApiKey(connection)
+    const auth = await this.config.resolveAuth(connection)
     const userId = this.config.resolveUserId()
     const consumer = new AbortController()
     const upstream = options.signal === undefined
@@ -205,7 +205,7 @@ export class ChatCompletionsAdapter extends LlmAdapter {
       options,
       watchdog.signal,
       connection,
-      apiKey,
+      auth,
       userId,
       attachments,
       () => { watchdog.pulse() },
@@ -249,13 +249,13 @@ export class ChatCompletionsAdapter extends LlmAdapter {
     options: GenerateOptions,
     signal: AbortSignal,
     connection: DeepSeekConnectionOptions,
-    apiKey: string,
+    auth: DeepSeekRequestAuth,
     userId: AnonymousUserId,
     attachments: AttachmentStore | undefined,
     onActivity: () => void,
   ): AsyncIterable<StreamChunk> {
     const headers = {
-      'authorization': `Bearer ${apiKey}`,
+      ...auth.headers,
       'content-type': 'application/json',
       'accept': 'text/event-stream',
       ...attributionHeaders(),
@@ -268,7 +268,7 @@ export class ChatCompletionsAdapter extends LlmAdapter {
         : {},
     }
 
-    const fileConnection = { baseURL: connection.baseURL, apiKey, protocol: connection.protocol }
+    const fileConnection = { baseURL: connection.baseURL, headers: auth.headers }
     const model = connection.models.find(entry => entry.id === options.model)
     const resolveImageAccess = attachments === undefined
       ? undefined

@@ -12,7 +12,11 @@ import { DeepSeekAdapter } from './adapter.ts'
 import { ConfigWithApiKey, plainOptionsWithApiKey, resolveAdapterOptions } from './config.ts'
 import type { ResolvedDeepSeekOptions } from './config.ts'
 
-export { deepSeekConfigFields, Config, ConfigWithApiKey, plainOptions, plainOptionsWithApiKey, resolveAdapterOptions, PUBLIC_BASE_URL, MESSAGES_BASE_URL } from './config.ts'
+// The loader resolves the entry schema from this package's `Config` export.
+// dsh fork 定制: the fork provider carries an inline apiKeyEnv reference, so the
+// loader-visible schema must be the apiKeyEnv-inclusive one — otherwise the
+// patched entry validates without apiKeyEnv and apply() crashes on .get().
+export { deepSeekConfigFields, ConfigWithApiKey as Config, ConfigWithApiKey, plainOptions, plainOptionsWithApiKey, resolveAdapterOptions, PUBLIC_BASE_URL, MESSAGES_BASE_URL } from './config.ts'
 export type { Options, OptionsWithApiKey, ResolvedDeepSeekOptions } from './config.ts'
 export {
   DEFAULT_CONTEXT_WINDOW,

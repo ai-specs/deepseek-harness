@@ -1017,7 +1017,8 @@ def smoke_sdk_authoring(base_url: str, executable: Path, update_snapshots: bool)
                     if tool.get("name") == "load_workspace_dependencies"
                     or (tool.get("function") or {}).get("name") == "load_workspace_dependencies"
                 )
-                visible = {"tool": schema, "result": {**dependencies, "python": "{{python}}", "pythonPackages": "{{site-packages}}"}}
+                visible = {"tool": schema, "result": {**dependencies, "python": "{{python}}", "pythonPackages": "{{site-packages}}",
+                           **{name: "{{" + name + "}}" for name in ("node", "nodePackages", "pnpm")}}}
                 compare_snapshot_files(
                     {"model-visible.json": json.dumps(visible, indent=2, ensure_ascii=False) + "\n"},
                     update_snapshots, Path(__file__).parent / "snapshots/python-sdk-single-exe/authoring",

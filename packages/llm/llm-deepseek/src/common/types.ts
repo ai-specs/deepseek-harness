@@ -5,6 +5,7 @@ import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import type { AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import type { DeepSeekLlmApiExtensionRequest, PreparedDeepSeekLlmApiExtensions } from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import type { DeepSeekFileStore, DeepSeekFilePolicy } from './file-store.ts'
+import type { DeepSeekRequestAuth } from '../types.ts'
 
 /** Supported wire implementations; Responses is not yet implemented. */
 export type DeepSeekProtocol = 'chat-completions' | 'messages'
@@ -94,12 +95,12 @@ export interface DeepSeekAdapterOptions {
   /** Current validated connection facts; called once per operation. */
   options: () => DeepSeekConnectionOptions
   /**
-   * Resolve the bearer token for the connection facts of one request. The
-   * snapshot is passed in — never re-read — so the key can only ever come
-   * from the same resolution as the endpoint it is sent to. Throws `LlmError`
-   * `MISSING_CREDENTIAL` when no key is available anywhere.
+   * Resolve provider authentication for the connection facts of one request.
+   * The snapshot is passed in — never re-read — so the credential can only
+   * ever come from the same resolution as the endpoint it is sent to. Throws
+   * `LlmError` `MISSING_CREDENTIAL` when no credential is available anywhere.
    */
-  resolveApiKey: (connection: DeepSeekConnectionOptions) => Promise<string>
+  resolveAuth: (connection: DeepSeekConnectionOptions) => Promise<DeepSeekRequestAuth>
   /** Resolve the harness-home anonymous id shared with telemetry and feedback. */
   resolveUserId: () => AnonymousUserId
   /** Resolve the current durable attachment service; absence rejects image input. */
