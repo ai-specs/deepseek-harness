@@ -19,6 +19,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import * as SessionLogDeepSeek from '@deepseek-ai/dsh-session-log-deepseek'
 import '../../src/tool-result-block.ts'
 import * as Messages from '../../src/index.ts'
+import * as MessagesProvider from '@deepseek-ai/dsh-llm-deepseek-api-key'
 import { DeepSeekFilesClient } from '../../src/common/files-api.ts'
 import { MESSAGES_FILES_BETA } from '../../src/common/messages-api.ts'
 import { assemble, options, user } from '../helpers'
@@ -45,7 +46,7 @@ async function boot(models?: Messages.Options['models']) {
   const ctx = new Context()
   cleanups.push(() => ctx.fiber.dispose())
   await ctx.plugin(LlmRuntime)
-  await ctx.plugin(Messages, {
+  await ctx.plugin(MessagesProvider, {
     // dsh fork: this suite tests the Messages wire protocol explicitly; the
     // fork default is chat-completions, so pin the protocol here.
     protocol: 'messages',
@@ -54,7 +55,7 @@ async function boot(models?: Messages.Options['models']) {
     ...models === undefined ? {} : { models },
     // e2e config is plain Options; the plugin accepts volatile Config and its
     // resolver tolerates plain values (plainOptions passes non-volatile through).
-  } as any)
+  })
   return ctx
 }
 const tool = { name: 'lookup_value', description: 'Read the requested value. Always call this tool to obtain a value.', parameters: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } }

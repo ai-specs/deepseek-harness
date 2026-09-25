@@ -39,6 +39,10 @@ export function apply(ctx: Context, config: Config): void {
   ])
   registerDeepSeekProvider(ctx, PROVIDER, {
     options, providerName: 'DeepSeek',
+    // Upstream separation (kept): this provider authenticates with the API key
+    // only. Signed-in account routes live in llm-deepseek-account
+    // (provider deepseek-account); the fork's pre-split "account first" fallback
+    // was retired with the upstream package split and its account-routing tests.
     resolveAuth: async connection => ({ headers: { 'x-api-key': await resolveApiKey(connection) } }),
     discoverModels: (provider) => {
       const connection = options()

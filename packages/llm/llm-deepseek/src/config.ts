@@ -3,7 +3,6 @@ import type { Volatile } from '@deepseek-ai/cordis'
 
 import z from '@deepseek-ai/schemastery'
 import { isVolatile } from '@deepseek-ai/cosmokit'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
 import type { ModelModality, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
 import type { LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
@@ -14,8 +13,6 @@ import { DEFAULT_STREAM_IDLE_TIMEOUT_MS, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOK
 import { DEFAULT_MAX_IMAGES_PER_REQUEST, DEFAULT_MAX_REQUEST_FILES_BYTES, DEFAULT_REQUEST_IMAGE_MAX_BYTES } from './request-pricing.ts'
 
 const MODEL_MODALITIES = ['text', 'image'] as const satisfies readonly ModelModality[]
-
-const DEFAULT_API_KEY_ENV = 'DEEPSEEK_API_KEY'
 
 /** Shared Messages request configuration, without provider credential selection. */
 export interface Config {
@@ -114,35 +111,6 @@ export const deepSeekConfigFields = {
 }
 
 export const Config = z.object(deepSeekConfigFields)
-
-/**
- * dsh fork: the inline provider's configuration extends the shared fields with
- * one API-key credential reference (upstream split this into a separate
- * llm-deepseek-api-key package; the fork's single plugin keeps it inline).
- */
-export interface ConfigWithApiKey extends Config {
-  /** Credential reference (environment-variable name) resolved per request; defaults to `DEEPSEEK_API_KEY`. */
-  apiKeyEnv: Volatile<string>
-}
-
-/** Plain options accepted by the fork's inline provider resolver. */
-export type OptionsWithApiKey = Options & { apiKeyEnv?: string }
-
-/** Schema fields for the fork's inline provider configuration. */
-export const deepSeekApiKeyConfigFields = {
-  ...deepSeekConfigFields,
-  apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV).volatile(),
-}
-
-export const ConfigWithApiKey = z.object(deepSeekApiKeyConfigFields)
-
-/** Read the current value behind every reference of a validated fork Config.
- * @param config Parsed fork plugin Config.
- * @returns Plain options for the resolver, including the credential reference.
- */
-export function plainOptionsWithApiKey(config: ConfigWithApiKey): OptionsWithApiKey {
-  return { ...plainOptions(config), apiKeyEnv: config.apiKeyEnv.get() }
-}
 
 /** Public API default; the internal endpoint comes from $DEEPSEEK_BASE_URL. */
 export const PUBLIC_BASE_URL = 'https://api.deepseek.com'
@@ -249,7 +217,7 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
  * gateway that checkout is meant to use.
  * @returns validated protocol settings.
  */
-export function resolveAdapterOptions(config: OptionsWithApiKey, environment?: LaunchEnvironmentSnapshot): ResolvedDeepSeekOptions {
+export function resolveAdapterOptions(config: Options, environment?: LaunchEnvironmentSnapshot): ResolvedDeepSeekOptions {
   if (config.thinking === 'disabled'
     && config.reasoningEffort !== undefined
     && config.reasoningEffort !== 'off') {
@@ -343,11 +311,9 @@ export function resolveAdapterOptions(config: OptionsWithApiKey, environment?: L
     throw new Error('llm-deepseek: Messages baseURL must be an HTTP(S) root without credentials, query, or fragment')
   }
   return {
-    apiKeyEnv: credentialRef(config.apiKeyEnv ?? DEFAULT_API_KEY_ENV),
-    // Programmatic callers (tests, library users) default to the upstream
-    // Messages protocol; plugin configs carry an explicit protocol through
-    // plainOptions, so product semantics keep it (dsh fork deployments opt
-    // into chat-completions via settings.yaml).
+    // dsh fork: the credential reference is attached by the api-key provider
+    // package (upstream split), which also owns apiKeyEnv resolution; the
+    // shared protocol layer stays credential-free.
     protocol: config.protocol ?? 'messages',
     baseURL,
     defaults: {

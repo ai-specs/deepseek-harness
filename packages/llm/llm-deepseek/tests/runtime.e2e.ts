@@ -25,6 +25,7 @@ import DeepSeekLlmApiExtensionRegistry from '@deepseek-ai/dsh-deepseek-llm-api-e
 import * as PluginPackageInventoryDeepSeek from '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
 import * as SessionLogDeepSeek from '@deepseek-ai/dsh-session-log-deepseek'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
+import * as LlmDeepSeekProvider from '@deepseek-ai/dsh-llm-deepseek-api-key'
 import type { Options as Config } from '@deepseek-ai/dsh-llm-deepseek'
 import type { WireRequest } from '../src/wire-types.ts'
 import { assemble, type AssembledResult } from './assemble.ts'
@@ -114,7 +115,7 @@ async function harness(model: string, config: Partial<Config> = {}) {
   contexts.push(ctx)
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(E2eAttachmentStore)
-  await ctx.plugin(LlmDeepSeek, {
+  await ctx.plugin(LlmDeepSeekProvider, {
     baseURL: E2E_BASE_URL,
     ...model === VISION ? { models: [{ id: VISION, inputModalities: ['text', 'image'] }] } : {},
     ...config,
@@ -159,7 +160,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
     contexts.push(ctx)
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(LocalAttachments)
-    await ctx.plugin(LlmDeepSeek, { baseURL: E2E_BASE_URL, maxTokens: 4096 })
+    await ctx.plugin(LlmDeepSeekProvider, { baseURL: E2E_BASE_URL, maxTokens: 4096 })
     const model = 'deepseek-flash'
     await expect(ctx.llm.resolveModelInfo('deepseek-official', model)).resolves.toMatchObject({
       inputModalities: ['text', 'image'], systemPromptUpdate: 'in-history',
@@ -238,7 +239,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
     await ctx.plugin(DeepSeekLlmApiExtensionRegistry)
     await ctx.plugin(SessionLogDeepSeek, { enabled: true })
     await ctx.plugin(PluginPackageInventoryDeepSeek)
-    await ctx.plugin(LlmDeepSeek, { baseURL: E2E_BASE_URL, thinking: 'disabled' })
+    await ctx.plugin(LlmDeepSeekProvider, { baseURL: E2E_BASE_URL, thinking: 'disabled' })
     const session = ctx.sessions.create(SessionId('real-extension-fields'))
     session.append('turn/start', { turn: 1 })
 
@@ -268,7 +269,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
       contexts.push(ctx)
       await ctx.plugin(LlmRuntime)
       await ctx.plugin(LocalCredentialProvider, { path: join(dir, '.credentials.yaml'), watch: false })
-      await ctx.plugin(LlmDeepSeek, { baseURL: E2E_BASE_URL })
+      await ctx.plugin(LlmDeepSeekProvider, { baseURL: E2E_BASE_URL })
 
       const result = await assemble(ctx, {
         model: FLASH,

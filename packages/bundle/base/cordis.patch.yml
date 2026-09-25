@@ -523,12 +523,17 @@
     # key coming from the credential store below. Thinking defaults are a deployment
     # choice.
     #
-    # dsh fork 定制（2026-09-16 merge 上游后）：
+    # dsh fork 定制（2026-09-16 merge 上游后，2026-09-25 按上游拆分对齐）：
     # 上游 0.1.6-alpha.1 默认协议为 messages（Anthropic 风格 /v1/messages，面向
     # api.deepseek.com/anthropic）。本项目 LLM 后端为 DashScope compatible-mode
     # （OpenAI 风格 /v1/chat/completions，见 .env DEEPSEEK_BASE_URL），messages
     # 协议请求会 404 —— 钉死 protocol: chat-completions（settings 可覆盖）。
+    # id `llm-deepseek` 按上游映射到 llm-deepseek-api-key 包（apiKeyEnv 位于该
+    # 包 Config）；账号路由由独立的 llm-deepseek-account 提供。
     - id: llm-deepseek
-      name: '@deepseek-ai/dsh-llm-deepseek'
+      name: '@deepseek-ai/dsh-llm-deepseek-api-key'
       config:
         protocol: chat-completions
+
+    - id: llm-deepseek-account
+      name: '@deepseek-ai/dsh-llm-deepseek-account'

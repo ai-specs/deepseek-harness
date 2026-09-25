@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-09-25-follow-upstream-architecture-when-porting-fork-customizations.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-25-follow-upstream-architecture-when-porting-fork-customizations.md
+/agent-note-follow-upstream-architecture-when-porting-fork-customizations:
+  en: cfaf5970b1b572a0
+  zh: d9e2ecffaff9ed10
+/agent-note-follow-upstream-architecture-when-porting-fork-customizations/problem:
+  en: e981e10756ed297a
+  zh: 890cf670079f9639
+/agent-note-follow-upstream-architecture-when-porting-fork-customizations/decision:
+  en: 8fa338ca57c8289f
+  zh: bf9fcedf4ff212ab
+/agent-note-follow-upstream-architecture-when-porting-fork-customizations/alternatives-considered:
+  en: bb41a91954ed2d26
+  zh: 14ed97ed38100b2a
+/agent-note-follow-upstream-architecture-when-porting-fork-customizations/consequences:
+  en: 52b34253d24f5d0b
+  zh: fed9b6f026a129da

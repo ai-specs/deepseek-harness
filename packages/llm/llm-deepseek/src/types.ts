@@ -1,7 +1,6 @@
 /** Model catalog and request-local dependencies for DeepSeek Messages. */
 import type { LlmModelInfo, ModelModality, SystemPromptUpdate, ToolUpdate, ResolvedRetryPolicy, ImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import type { AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import type { DeepSeekLlmApiExtensionRequest, PreparedDeepSeekLlmApiExtensions } from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import type { DeepSeekFileStore, DeepSeekFilePolicy } from './file-store.ts'
@@ -54,13 +53,6 @@ export interface DeepSeekConnectionOptions {
   protocol: 'chat-completions' | 'messages'
   /** Messages API root; custom paths remain unchanged. */
   baseURL: string
-  /**
-   * Credential reference of this same resolution, resolved per request.
-   * Travelling with the endpoint is the point: a request can never pair one
-   * generation's URL with another generation's secret. Configuration carries
-   * only this name — a literal key is not a configuration value.
-   */
-  apiKeyEnv: CredentialRef
   /** Request defaults applied to every call (thinking mode, effort). */
   defaults: RequestDefaults
   /** Default per-request output cap; explicit request values win. */
