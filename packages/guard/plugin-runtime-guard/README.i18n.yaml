@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/guard/plugin-runtime-guard/README.md
+/:
+  en: a203589679772721
+  zh: f93c4000ae6b38cb
+/deepseek-ai-dsh-plugin-runtime-guard:
+  en: 3b48c3a95d256866
+  zh: 86b18d7851dd47fe
+/deepseek-ai-dsh-plugin-runtime-guard/summary:
+  en: 150e39bc288ea858
+  zh: cc1c1ca76932aede
+/deepseek-ai-dsh-plugin-runtime-guard/table-of-contents:
+  en: f95c7c427b2ec4d9
+  zh: 24f6d4c82be123a9
+/deepseek-ai-dsh-plugin-runtime-guard/use-this-package:
+  en: 6967bcfd92229289
+  zh: 3dfe4f555592fa34
+/deepseek-ai-dsh-plugin-runtime-guard/use-this-package/when-to-choose-it:
+  en: 24d8ec5633222354
+  zh: 89b24de6cfa9c68f
+/deepseek-ai-dsh-plugin-runtime-guard/use-this-package/minimal-configuration:
+  en: 474206640184d78a
+  zh: 5a72ad983ccc675d
+/deepseek-ai-dsh-plugin-runtime-guard/configuration:
+  en: f029a53471ceff4a
+  zh: 64e35ccb3aca6156
+/deepseek-ai-dsh-plugin-runtime-guard/usage:
+  en: 1147fb3b73e34072
+  zh: 7de65d65ee207b6e
+/deepseek-ai-dsh-plugin-runtime-guard/dev-note:
+  en: c8ef982a1653941c
+  zh: 9c9c7c6fbb257285
+/deepseek-ai-dsh-plugin-runtime-guard/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-plugin-runtime-guard/model-experience/guard-enforcement:
+  en: 320654c8f563ca71
+  zh: 62eb8a5f747ccf7a
+/deepseek-ai-dsh-plugin-runtime-guard/model-experience/guard-enforcement/what-the-model-sees:
+  en: 9d293f622ca3bf98
+  zh: fd3e5261d823101c
+/deepseek-ai-dsh-plugin-runtime-guard/model-experience/guard-enforcement/token-effect:
+  en: 7d21a492eaf94fde
+  zh: d83746146d0fd808
+/deepseek-ai-dsh-plugin-runtime-guard/model-experience/guard-enforcement/kv-cache-effect:
+  en: e33b7b6328d7dc39
+  zh: 7f3b6d6ce6f616d6
+/deepseek-ai-dsh-plugin-runtime-guard/known-limitations-and-deferred-work:
+  en: 0dfebe9511cf3773
+  zh: ba2babbe655f8a6b

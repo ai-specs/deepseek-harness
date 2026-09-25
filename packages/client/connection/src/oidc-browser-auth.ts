@@ -141,7 +141,14 @@ export class OidcBrowserAuth {
     this.secret = secret
   }
 
-  /** Load (or create) the durable signing secret, then build the auth. */
+  /**
+   * Load (or create) the durable signing secret, then build the auth.
+   * @param credentials - 持久化凭证提供者（签名密钥存储）。
+   * @param config - OIDC 浏览器认证配置。
+   * @param maxAgeDays - 浏览器 cookie 绝对寿命（天）。
+   * @param identity - 可选 web 身份留存（alive 检查/save/clear）。
+   * @returns 初始化完成的 OIDC 浏览器认证。
+   */
   static async create(
     credentials: CredentialProvider,
     config: OidcBrowserAuthConfig,
@@ -169,6 +176,7 @@ export class OidcBrowserAuth {
    * while the identity is alive, so a broken refresh chain forces a fresh
    * sign-in instead of leaving a UI that works while the relay silently dies.
    * The optional clear hook is logout's first step (drop the retained tokens).
+   * @param identity - 待绑定的 web 身份句柄。
    */
   bindIdentity(identity: {
     readonly alive: () => boolean
@@ -185,7 +193,11 @@ export class OidcBrowserAuth {
     return this.config.callbackPath ?? DEFAULT_CALLBACK_PATH
   }
 
-  /** OIDC mode needs no console token: the clean root URL is the entry point. */
+  /**
+   * OIDC mode needs no console token: the clean root URL is the entry point.
+   * @param baseUrl - 原始浏览器 URL。
+   * @returns 清洗后的根 URL（路径=/、去 query/hash）。
+   */
   authenticatedUrl(baseUrl: string): string {
     const url = new URL(baseUrl)
     url.pathname = '/'
@@ -198,6 +210,9 @@ export class OidcBrowserAuth {
    * Authenticate an index request. A valid cookie lets the caller serve the
    * index; a GET without one is redirected to the IdP (state + PKCE challenge
    * tracked in memory); everything else receives the minimal 401.
+   * @param req - 根/配置索引请求。
+   * @param res - 未通过时由本方法接管并终结的响应。
+   * @returns 仅当调用方可继续提供 index.html 时为 true。
    */
   authorizeIndex(req: ConnectionIndexRequest, res: ConnectionIndexResponse): boolean {
     if (this.isAuthenticated(req)) return true
@@ -219,6 +234,8 @@ export class OidcBrowserAuth {
    * Consume the IdP callback: exchange the code (PKCE verifier, public client,
    * no secret), then mint the same authority-bound session cookie and land on
    * the clean root. Owns the response in every outcome.
+   * @param req - 回调请求（code/state）。
+   * @param res - 所有路径下都由本方法终结的响应。
    */
   async handleCallback(req: ConnectionIndexRequest, res: ConnectionIndexResponse): Promise<void> {
     const authority = requestAuthority(req.headers)
@@ -230,13 +247,15 @@ export class OidcBrowserAuth {
       res.end(message)
     }
     if (authority === undefined || code === null || state === null) {
-      return fail(400, 'dsh web oidc sign-in failed: missing code or state\n')
+      fail(400, 'dsh web oidc sign-in failed: missing code or state\n')
+      return
     }
     const pending = this.pending.get(state)
     this.pending.delete(state)
     const redirectUri = `http://${authority}${this.callbackPath}`
     if (pending === undefined || pending.expiresAt <= Date.now() || pending.redirectUri !== redirectUri) {
-      return fail(400, 'dsh web oidc sign-in failed: unknown or expired sign-in attempt\n')
+      fail(400, 'dsh web oidc sign-in failed: unknown or expired sign-in attempt\n')
+      return
     }
     let body: { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown; id_token?: unknown }
     try {
@@ -253,14 +272,17 @@ export class OidcBrowserAuth {
         signal: AbortSignal.timeout(TOKEN_TIMEOUT_MILLISECONDS),
       })
       if (!response.ok) {
-        return fail(401, `dsh web oidc sign-in failed: token endpoint returned ${String(response.status)}\n`)
+        fail(401, `dsh web oidc sign-in failed: token endpoint returned ${String(response.status)}\n`)
+        return
       }
       body = await response.json() as typeof body
       if (typeof body.access_token !== 'string' || body.access_token === '') {
-        return fail(401, 'dsh web oidc sign-in failed: token endpoint returned no access token\n')
+        fail(401, 'dsh web oidc sign-in failed: token endpoint returned no access token\n')
+        return
       }
     } catch (error) {
-      return fail(401, `dsh web oidc sign-in failed: ${String(error)}\n`)
+      fail(401, `dsh web oidc sign-in failed: ${String(error)}\n`)
+      return
     }
     if (this.identitySink !== undefined) {
       // 本地为主（期 1.5）：换到的用户令牌留存为 web 身份（自动续期，驱动
@@ -292,7 +314,11 @@ export class OidcBrowserAuth {
     res.end()
   }
 
-  /** Same authority-bound signed-cookie verification as the launch-token strategy. */
+  /**
+   * Same authority-bound signed-cookie verification as the launch-token strategy.
+   * @param request - 携带 Host/Cookie 的请求头。
+   * @returns 仅当未过期且由本次激活密钥签名、且 web 身份存活时为 true。
+   */
   isAuthenticated(request: ConnectionTrustRequest): boolean {
     const authority = requestAuthority(request.headers)
     const rawCookie = header(request.headers, 'cookie')
@@ -315,6 +341,8 @@ export class OidcBrowserAuth {
    * session and — when the root redirect is registered on the client — lands
    * back on this deployment's root, where the fence routes to a fresh
    * sign-in). Owns the response in every outcome.
+   * @param req - 登出请求。
+   * @param res - 由本方法终结的重定向响应。
    */
   async handleLogout(req: ConnectionIndexRequest, res: ConnectionIndexResponse): Promise<void> {
     await this.identityClear?.().catch(() => undefined)

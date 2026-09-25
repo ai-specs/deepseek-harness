@@ -107,7 +107,7 @@ describe('SessionIndex 持久化（PC 重启恢复）', () => {
     await sleep(3)
     a.record({ sessionId: 'l2', phase: 'RUNNING', prompt: 'q2' })
     await sleep(3)
-    const since = String((a.get('l2') as { updatedAt: string }).updatedAt)
+    const since = (a.get('l2') as { updatedAt: string }).updatedAt
     a.record({ sessionId: 'l3', phase: 'completed', prompt: 'q3', result: 'r3' })
 
     const full = a.list()

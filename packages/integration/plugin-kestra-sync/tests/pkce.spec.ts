@@ -17,7 +17,7 @@ import {
 } from '../src/core.ts'
 
 const tempDir = mkdtempSync(join(tmpdir(), 'pkce-test-'))
-afterEach(() => rmSync(join(tempDir, 'cache.json'), { force: true }))
+afterEach(() => { rmSync(join(tempDir, 'cache.json'), { force: true }) })
 
 function testConfig(overrides: Partial<PkceConfig> = {}): PkceConfig {
   return {
@@ -64,7 +64,7 @@ describe('PKCE helpers (dsh.docx 统一认证：公开客户端无 secret)', () 
     })
     expect(url).toBe('http://kestra:8080/oidc/token')
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
-    const body = new URLSearchParams(String(init.body))
+    const body = new URLSearchParams(init.body as string)
     expect(body.get('client_id')).toBe('dsh-pc')
     expect(body.get('code_verifier')).toBe('v')
     expect(body.get('grant_type')).toBe('authorization_code')
@@ -82,7 +82,7 @@ describe('PkceTokenProvider', () => {
     const seenAuthorize: string[] = []
     const fetchImpl = vi.fn().mockImplementation(async (url: unknown, init?: RequestInit) => {
       if (String(url).endsWith('/oidc/token')) {
-        bodies.push(new URLSearchParams(String(init?.body)))
+        bodies.push(new URLSearchParams((init?.body as string | undefined) ?? ''))
         return new Response(JSON.stringify({
           access_token: 'at-1',
           refresh_token: 'rt-1',
@@ -96,9 +96,9 @@ describe('PkceTokenProvider', () => {
     const port = 34_000 + Math.floor(Math.random() * 20_000)
     const provider = new PkceTokenProvider(testConfig({
       redirectPort: port,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+      fetchImpl: fetchImpl,
       // “浏览器”：拿到授权 URL 后解析 challenge，直接回跳 loopback /callback?code&state
-      openUrl: async (authorizeUrl) => {
+      openUrl: (authorizeUrl: string) => {
         seenAuthorize.push(authorizeUrl)
         const u = new URL(authorizeUrl)
         const challenge = u.searchParams.get('code_challenge')
@@ -111,7 +111,7 @@ describe('PkceTokenProvider', () => {
         const callback = new URL(`http://127.0.0.1:${port}/callback`)
         callback.searchParams.set('code', 'auth-code-1')
         callback.searchParams.set('state', state ?? '')
-        await fetch(callback.toString()).catch(() => {})
+        void fetch(callback.toString()).catch(() => {})
       },
     }))
     const tokens = await provider.login()
@@ -127,7 +127,7 @@ describe('PkceTokenProvider', () => {
     const init = fetchImpl.mock.calls[0]![1] as RequestInit
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
     // 缓存落盘（0600）
-    const cached = JSON.parse(readFileSync(testConfig().cachePath!, 'utf8'))
+    const cached = JSON.parse(readFileSync(testConfig().cachePath!, 'utf8')) as { accessToken?: string }
     expect(cached.accessToken).toBe('at-1')
   })
 
@@ -139,7 +139,7 @@ describe('PkceTokenProvider', () => {
 
     const bodies: URLSearchParams[] = []
     const fetchImpl = vi.fn().mockImplementation(async (_url: unknown, init?: RequestInit) => {
-      bodies.push(new URLSearchParams(String(init?.body)))
+      bodies.push(new URLSearchParams((init?.body as string | undefined) ?? ''))
       return new Response(JSON.stringify({
         access_token: 'at-2',
         refresh_token: 'rt-new',
@@ -149,7 +149,7 @@ describe('PkceTokenProvider', () => {
     })
     const provider = new PkceTokenProvider(testConfig({
       cachePath: cache,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+      fetchImpl: fetchImpl,
     }))
     expect(provider.currentSub()).toBe('alice@kestra.io')
     const token = await provider.getToken()
@@ -158,7 +158,7 @@ describe('PkceTokenProvider', () => {
     expect(body.get('grant_type')).toBe('refresh_token')
     expect(body.get('refresh_token')).toBe('rt-old')
     expect(body.get('client_id')).toBe('dsh-pc')
-    const cached = JSON.parse(readFileSync(cache, 'utf8'))
+    const cached = JSON.parse(readFileSync(cache, 'utf8')) as { accessToken?: string; refreshToken?: string }
     expect(cached.accessToken).toBe('at-2')
     expect(cached.refreshToken).toBe('rt-new') // 旋转后的新 refresh 落盘
   })

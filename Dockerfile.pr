@@ -34,7 +34,7 @@ COPY website website
 RUN set -eux; \
     dirs=$(find /app/node_modules/.pnpm -maxdepth 1 -name 'fs-ext@*' -type d); \
     if [ -z "$dirs" ]; then \
-      echo 'fs-ext absent from install tree (superseded by prebuilt flock, upstream d927cbff99) — nothing to build'; \
+      echo 'fs-ext absent from install tree (superseded by prebuilt flock, upstream merge +852) — nothing to build'; \
     else \
       for d in $dirs; do \
         (cd "$d/node_modules/fs-ext" && npx node-gyp rebuild); \

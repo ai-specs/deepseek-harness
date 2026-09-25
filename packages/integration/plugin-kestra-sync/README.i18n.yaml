@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/integration/plugin-kestra-sync/README.md
+/:
+  en: 165037db758f4088
+  zh: 5e158b4f274a1f7d
+/deepseek-ai-dsh-plugin-kestra-sync:
+  en: 16eb6da2a565eeb8
+  zh: 0757feaf0afe1034
+/deepseek-ai-dsh-plugin-kestra-sync/summary:
+  en: dbe7e76f32b77ab4
+  zh: bd1506425de3c8d1
+/deepseek-ai-dsh-plugin-kestra-sync/table-of-contents:
+  en: f95c7c427b2ec4d9
+  zh: 24f6d4c82be123a9
+/deepseek-ai-dsh-plugin-kestra-sync/use-this-package:
+  en: 9b49fb8ff45e39ee
+  zh: a2b2b9bba9e98643
+/deepseek-ai-dsh-plugin-kestra-sync/use-this-package/when-to-choose-it:
+  en: f88592007ecb91cb
+  zh: 7c9f68f24ea223ce
+/deepseek-ai-dsh-plugin-kestra-sync/use-this-package/minimal-configuration:
+  en: c3b78d35d46311d6
+  zh: 44dabbfaff0e4460
+/deepseek-ai-dsh-plugin-kestra-sync/configuration:
+  en: 4e716cf609ee3569
+  zh: 914543b9e5c8c0ce
+/deepseek-ai-dsh-plugin-kestra-sync/usage:
+  en: cb69dd35493c6609
+  zh: b572762caecc4cbe
+/deepseek-ai-dsh-plugin-kestra-sync/dev-note:
+  en: e08268a30521fe3e
+  zh: 9503048fdc9f6f39
+/deepseek-ai-dsh-plugin-kestra-sync/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-plugin-kestra-sync/model-experience/session-snapshot-sync:
+  en: 21ef5964968b6118
+  zh: 1a8b9713dcf363b8
+/deepseek-ai-dsh-plugin-kestra-sync/model-experience/session-snapshot-sync/what-the-model-sees:
+  en: 4901bc4875c6137a
+  zh: ac0c8eac2f0a068b
+/deepseek-ai-dsh-plugin-kestra-sync/model-experience/session-snapshot-sync/token-effect:
+  en: fa582f8098602062
+  zh: 9cbb0f3bc3550557
+/deepseek-ai-dsh-plugin-kestra-sync/model-experience/session-snapshot-sync/kv-cache-effect:
+  en: e33b7b6328d7dc39
+  zh: 7f3b6d6ce6f616d6
+/deepseek-ai-dsh-plugin-kestra-sync/known-limitations-and-deferred-work:
+  en: 6cf77491ca06bea1
+  zh: efa0f98ff6a7c722

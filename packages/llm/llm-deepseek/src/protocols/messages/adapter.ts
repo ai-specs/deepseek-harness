@@ -92,7 +92,8 @@ export class DeepSeekMessagesAdapter extends LlmAdapter {
     // RequestUserInput (single-shot identity-free user turn) is structurally a
     // user Message; the serializer consumes it exactly like a durable user turn.
     const { messages, versions } = await prepareImages(
-      options.messages as readonly Message[], connection, options.model, this.dependencies.attachments(), this.dependencies.imageAccess, signal,
+      options.messages as readonly Message[], connection, options.model, this.dependencies.attachments(),
+      this.dependencies.imageAccess, signal,
     )
     const key = await this.dependencies.apiKey(connection)
     const files = new RequestFiles(this.dependencies.files(), { baseURL: connection.baseURL, apiKey: key, protocol: 'messages' },

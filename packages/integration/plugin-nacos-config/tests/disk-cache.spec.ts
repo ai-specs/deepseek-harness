@@ -24,7 +24,7 @@ function clientWith(cacheDir: string, failing: boolean, yamlContent?: string): N
   })
   return new NacosConfigClient(
     { server: 'http://nacos.test', cacheDir, username: 'n', password: 'p' },
-    fetchImpl as unknown as typeof fetch,
+    fetchImpl,
   )
 }
 
@@ -32,7 +32,7 @@ describe('配置磁盘缓存（审查任务 1.2）', () => {
   it('first boot without disk cache still serves from Nacos and persists to disk', async () => {
     const dir = newCacheDir()
     const client = clientWith(dir, false, 'window:\n  maxMessages: 40')
-    const parsed = await client.fetchConfig<any>('dsh-context.yaml')
+    const parsed = await client.fetchConfig<{ window?: { maxMessages?: number } }>('dsh-context.yaml')
     expect(parsed?.window?.maxMessages).toBe(40)
     const yamlPath = join(dir, 'dsh', 'DEFAULT_GROUP', 'dsh-context.yaml.yaml')
     expect(existsSync(yamlPath)).toBe(true)
@@ -44,7 +44,7 @@ describe('配置磁盘缓存（审查任务 1.2）', () => {
     const warm = clientWith(dir, false, 'window:\n  maxMessages: 40')
     await warm.fetchConfig('dsh-context.yaml')
     const degraded = clientWith(dir, true)
-    const parsed = await degraded.fetchConfig<any>('dsh-context.yaml')
+    const parsed = await degraded.fetchConfig<{ window?: { maxMessages?: number } }>('dsh-context.yaml')
     expect(parsed?.window?.maxMessages).toBe(40)
   })
 

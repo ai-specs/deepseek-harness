@@ -34,6 +34,9 @@ declare module '@deepseek-ai/cordis' {
 export const name = 'kestra-sync'
 export const inject = ['agents', 'sessionController', 'workspaceRegistry']
 
+/**
+ * 插件配置：继承 {@link KestraSyncConfig} 全部连接/推送参数，追加 dsh 接入端行为。
+ */
 export interface Config extends KestraSyncConfig {
   /** 批量队列磁盘持久化路径（默认 ~/.dsh/sync-queue.jsonl） */
   queuePath?: string
@@ -117,7 +120,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
     const next = {
       provider: envProvider ?? cur.provider,
       model: envModel ?? cur.model,
-      ...cur.reasoningEffort === undefined ? {} : { reasoningEffort: String(cur.reasoningEffort) },
+      ...cur.reasoningEffort === undefined ? {} : { reasoningEffort: `${cur.reasoningEffort as string | number}` },
     }
     if (next.provider !== cur.provider || next.model !== cur.model) {
       void svc.saveSelection(next)
@@ -194,6 +197,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
         }, signal: AbortSignal): Promise<{ accepted: true }>
       }
     }
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- defensive coalesce in case a caller violates the input type
     const recordSessionId = input.sessionId ?? pcSessionId
     const startedAt = Date.now()
     if (host.agents === undefined || host.sessionController === undefined) {
@@ -258,7 +262,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
       const idleTimeoutMs = (config.remoteInputTimeoutSeconds ?? 300) * 1000
       let idleTimer: ReturnType<typeof setTimeout> | undefined
       const timedOut = new Promise<boolean>((resolve) => {
-        idleTimer = setTimeout(() => resolve(true), idleTimeoutMs)
+        idleTimer = setTimeout(() => { resolve(true) }, idleTimeoutMs)
         ;(idleTimer as { unref?: () => void }).unref?.()
       })
       const idle = agent.whenIdle().then(() => false as const)
@@ -324,6 +328,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
     // 受理即登记 RUNNING 占位（同步，不经 chain 排队）：同一条 SSE 连接内事件有序，
     // input 事件先于后续 session.messages 查询到达，占位保证执行期间 phase/用户消息
     // 回显即可见（终态 record 按末位 prompt 去重，不会重复追加用户消息）。
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- keep the undefined guard as a caller-contract backstop
     if (input.sessionId !== undefined && input.sessionId !== '') {
       index.record({ sessionId: input.sessionId, phase: 'RUNNING', prompt: input.text })
     }
@@ -334,6 +339,7 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
         // 一律走 PC web 进程内 live agent——会话实体=手机 sessionId（PC UI 可见、
         // live agent 保持续上下文、权威标题回填；追问 resume 同一实体）。不再有
         // headless 子进程回退：live agent 不可用/创建失败即执行失败（记录 failed 终态）。
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- defensive fallback if a caller omits sessionId
         void executeOnLiveAgent(input, input.sessionId ?? randomUUID(), {
           isNewSession: input.newSession === true,
           ...(input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
@@ -347,13 +353,13 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
   // 会话数据权威在 PC 本地；快照持久化（~/.dsh/kestra-session-index.json）保证
   // PC 重启后会话仍可被手机端查到（live 会话另经恢复通告重建，幂等）。
   const workspaceForSession = (sessionId: string): { workspaceId: string; title: string } | undefined => {
-    const workspace = workspaceRegistry.list().find(item => item.sessionIds.some(id => String(id) === sessionId))
-    return workspace === undefined ? undefined : { workspaceId: String(workspace.id), title: workspace.title }
+    const workspace = workspaceRegistry.list().find(item => item.sessionIds.some(id => id === sessionId))
+    return workspace === undefined ? undefined : { workspaceId: workspace.id, title: workspace.title }
   }
   ctx.on('session/created', (session) => { index.upsert(session, workspaceForSession(String(session.id))) })
   ctx.on('session/event', (session) => { index.upsert(session, workspaceForSession(String(session.id))) })
   // 退出兜底：进程正常退出前强制落盘（防抖周期最多丢 2s 内事件，正常退出不丢）。
-  process.once('exit', () => index.dispose())
+  process.once('exit', () => { index.dispose() })
 
   // 查询应答：session.list → 索引列表（时间线增量）；session.detail → 索引详情（未命中回填 error）。
   const handleQuery = (query: RelayQuery): Promise<void> => {
@@ -365,14 +371,14 @@ function mountClient(ctx: Context, config: Config, client: KestraSessionSyncClie
         : client.fillQueryResult(query.requestId, query.type, detail)
     }
     if (query.type === 'session.messages' && query.sessionId !== undefined) {
-      const messages = index.messages(query.sessionId, Number(query.afterSeq ?? 0))
+      const messages = index.messages(query.sessionId, query.afterSeq ?? 0)
       return messages === undefined
         ? client.fillQueryResult(query.requestId, query.type, undefined, 'session not found on PC')
         : client.fillQueryResult(query.requestId, query.type, messages)
     }
     if (query.type === 'workspace.list') {
       const workspaces = workspaceRegistry.list().map((workspace, position) => ({
-        workspaceId: String(workspace.id),
+        workspaceId: workspace.id,
         title: workspace.title,
         recent: position === 0,
         sessionCount: workspace.sessionIds.length,

@@ -237,6 +237,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
             return
           }
           void webIdentity?.ensureLoaded().then(() => {
+            // oxlint-disable-next-line typescript/no-unnecessary-condition -- same branch-only optional field
             const sub = webIdentity?.currentSub()
             if (sub === undefined) {
               res.writeHead(401, { 'cache-control': 'no-store', 'content-type': 'application/json' })

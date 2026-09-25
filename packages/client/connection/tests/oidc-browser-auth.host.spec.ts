@@ -96,7 +96,7 @@ async function completeLogin(
       if (init === undefined) throw new Error('fetch init missing')
       const headers = init.headers as Record<string, string>
       expect(headers['Content-Type']).toBe('application/x-www-form-urlencoded')
-      const body = new URLSearchParams(String(init.body))
+      const body = new URLSearchParams(init.body as string)
       expect(body.get('grant_type')).toBe('authorization_code')
       expect(body.get('client_id')).toBe('dsh-pc')
       expect(body.get('code')).toBe('the-code')

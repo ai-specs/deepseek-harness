@@ -35,6 +35,9 @@ export interface WebIdentityHandle {
   onChange?(listener: (sub: string | undefined) => void): () => void
 }
 
+/**
+ * 同步客户端配置：Kestra API 连接与推送模式（realtime/batch）。
+ */
 export interface KestraSyncConfig {
   /** Kestra API base URL, e.g. http://kestra.internal:8080 */
   baseUrl: string
@@ -48,6 +51,7 @@ export interface KestraSyncConfig {
   token?: string
   /** OIDC client for the client_credentials grant (the seeded `dsh` client). */
   clientId?: string
+  /** OIDC client secret for the client_credentials grant（仅服务身份模式使用，不落用户会话）。 */
   clientSecret?: string
   /**
    * 取票方式（默认按提供的凭据自动判定）：client_credentials=服务身份（dsh 执行面/脚本），
@@ -71,8 +75,12 @@ export interface KestraSyncConfig {
   timeoutMs?: number
 }
 
+/** 会话同步阶段：运行中 / 待审批 / 已完成 / 失败。 */
 export type SessionPhase = 'running' | 'pending_approval' | 'completed' | 'failed'
 
+/**
+ * 会话快照载荷：Kestra 端入库的最小稳定契约（手机端列表/详情展示的来源）。
+ */
 export interface SessionSnapshot {
   sessionId: string
   phase: SessionPhase
@@ -93,6 +101,7 @@ export interface SessionSnapshot {
   at?: string
 }
 
+/** 单次推送结果（HTTP 状态与阶段回显）。 */
 export interface PushResult {
   ok: boolean
   status: number
@@ -136,7 +145,11 @@ export interface MetricEvent {
   resolutionMs?: number
 }
 
-/** 纯函数：待处理输入的消费决策 —— 终态会话重新派生新会话，进行中则原地接力。 */
+/**
+ * 纯函数：待处理的输入消费决策 —— 终态会话重新派生新会话，进行中则原地接力。
+ * @param session - 目标会话（阶段与待处理输入）。
+ * @returns 接力（resume）或派生新会话（fork）的决策。
+ */
 export function decideInputTarget(session: { sessionId: string; phase: string; pendingInput?: string | null }):
   { kind: 'resume'; sessionId: string } | { kind: 'fork'; sessionId: string; newSessionId: string } {
   if (session.phase === 'COMPLETED' || session.phase === 'FAILED') {
@@ -145,7 +158,13 @@ export function decideInputTarget(session: { sessionId: string; phase: string; p
   return { kind: 'resume', sessionId: session.sessionId }
 }
 
-/** Builds the outbound request for a snapshot — pure, unit-testable. */
+/**
+ * Builds the outbound request for a snapshot — pure, unit-testable.
+ * @param config - 同步配置（baseUrl/timeout）。
+ * @param snapshot - 会话快照载荷。
+ * @param token - Bearer token（默认取 config.token）。
+ * @returns 待发起的 fetch 请求（url + init）。
+ */
 export function buildSyncRequest(
   config: KestraSyncConfig,
   snapshot: SessionSnapshot,
@@ -167,7 +186,11 @@ export function buildSyncRequest(
   }
 }
 
-/** Builds the client_credentials token request against the same OIDC provider — pure, unit-testable. */
+/**
+ * Builds the client_credentials token request against the same OIDC provider — pure, unit-testable.
+ * @param config - 同步配置（clientId/clientSecret/baseUrl）。
+ * @returns 待发起的 token 请求（url + init）。
+ */
 export function buildTokenRequest(config: KestraSyncConfig): { url: string; init: RequestInit } {
   const url = `${config.baseUrl.replace(/\/+$/, '')}/oidc/token`
   const basic = Buffer.from(`${config.clientId}:${config.clientSecret}`, 'utf8').toString('base64')
@@ -251,7 +274,10 @@ export class KestraSessionSyncClient {
     return this.cachedToken.value
   }
 
-  /** 当前登录用户（web-identity/PKCE 模式返回 IdP sub；服务身份返回 client id）。 */
+  /**
+   * 当前登录用户（web-identity/PKCE 模式返回 IdP sub；服务身份返回 client id）。
+   * @returns 当前身份标识；未配置任何身份来源时返回空字符串。
+   */
   currentSub(): string {
     return this.webIdentity?.currentSub() ?? this.pkce?.currentSub() ?? this.config.clientId ?? ''
   }
@@ -272,6 +298,10 @@ export class KestraSessionSyncClient {
    * 事件分发：`session.input` → handler（RemoteInput）；`session.approval.decision` →
    * options.approvalHandler。连接断开指数退避重连（1s 起 2 倍，封顶 30s；成功接收
    * 事件后重置）；401 时强制刷新 token 重试一次（S2 token 生命周期）。返回停止函数。
+   * @param handler - 手机待处理输入回调（session.input 事件）。
+   * @param onFirstLogin - 首次成功登录回调（携带当前 OIDC sub）。
+   * @param options - 可选：审批决策回调与会话查询处理器。
+   * @returns 停止 SSE 订阅的清理函数。
    */
   startInputSse(
     handler: (input: RemoteInput) => void | Promise<void>,
@@ -282,7 +312,7 @@ export class KestraSessionSyncClient {
       queryHandler?: (query: RelayQuery) => void | Promise<void>
     },
   ): () => void {
-    if (this.inputSseReading) return () => this.stopInputSse()
+    if (this.inputSseReading) return () => { this.stopInputSse() }
     this.inputSseReading = true
     const base = this.config.baseUrl.replace(/\/+$/, '')
     const sleep = (ms: number): Promise<void> => new Promise((resolve) => {
@@ -337,6 +367,7 @@ export class KestraSessionSyncClient {
           backoffMs = 1_000 // 连接成功重置退避
           await this.readInputSse(response.body, handler, options?.approvalHandler, options?.queryHandler)
         } catch (error) {
+          // oxlint-disable-next-line typescript/no-unnecessary-condition -- stopInputSse flips this during the async wait
           if (!this.inputSseReading) break
           process.stderr.write(`[kestra-sync] relay SSE disconnected: ${String(error instanceof Error ? error.message : error)} — reconnect in ${backoffMs}ms\n`)
           await sleep(backoffMs)
@@ -347,7 +378,7 @@ export class KestraSessionSyncClient {
       }
     })()
 
-    return () => this.stopInputSse()
+    return () => { this.stopInputSse() }
   }
 
   private stopInputSse(): void {
@@ -401,37 +432,37 @@ export class KestraSessionSyncClient {
               // 无法被消费，45s idle guard 会把仍健康的 PC 误判为离线。handler
               // 自身通过 mountClient 的 chain 保证串行执行，这里只负责持续收流。
               void Promise.resolve(handler({
-                sessionId: String(data.sessionId ?? ''),
-                text: String(data.text ?? ''),
+                sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
+                text: typeof data.text === 'string' ? data.text : '',
                 newSession: data.newSession === true,
-                ...(data.workspaceId === undefined || data.workspaceId === null || String(data.workspaceId) === ''
+                ...(data.workspaceId === undefined || data.workspaceId === null || (data.workspaceId as string) === ''
                   ? {}
-                  : { workspaceId: String(data.workspaceId) }),
+                  : { workspaceId: data.workspaceId as string }),
                 at: new Date().toISOString(),
-              })).catch((error) => {
+              })).catch((error: unknown) => {
                 process.stderr.write(`[kestra-sync] session.input handler failed: ${String(error)}\n`)
               })
             } else if (type === 'session.approval.decision') {
               await approvalHandler?.({
-                sessionId: String(data.sessionId ?? ''),
+                sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
                 approved: data.approved === true,
-                ...(data.comment === undefined ? {} : { comment: String(data.comment) }),
+                ...(data.comment === undefined ? {} : { comment: data.comment as string }),
               })
             } else if (type === 'session.query') {
               await queryHandler?.({
-                requestId: String(data.requestId ?? ''),
-                type: String(data.type ?? ''),
-                ...(data.sessionId === undefined || data.sessionId === null || String(data.sessionId) === ''
-                  ? {}
-                  : { sessionId: String(data.sessionId) }),
+                requestId: typeof data.requestId === 'string' ? data.requestId : '',
+                type: typeof data.type === 'string' ? data.type : '',
+                ...(typeof data.sessionId === 'string' && data.sessionId !== ''
+                  ? { sessionId: data.sessionId }
+                  : {}),
                 // afterSeq/since 必须随事件透传：session.messages 的 seq 游标与
                 // session.list 的时间线游标都依赖它们，丢弃会退化为全量响应。
                 ...(data.afterSeq === undefined || data.afterSeq === null
                   ? {}
                   : { afterSeq: Number(data.afterSeq) }),
-                ...(data.since === undefined || data.since === null || String(data.since) === ''
-                  ? {}
-                  : { since: String(data.since) }),
+                ...(typeof data.since === 'string' && data.since !== ''
+                  ? { since: data.since }
+                  : {}),
               })
             }
             // heartbeat / pc.status / session.result / session.approval：PC 订阅端不消费
@@ -449,9 +480,13 @@ export class KestraSessionSyncClient {
   /**
    * 会话查询结果回填（选项 B）：PC 应答中台转发的 session.query，POST 回
    * relay/query-result 缓存，Phone 轮询取走。失败静默（Phone 侧回落本地缓存）。
+   * @param requestId - 查询请求 id。
+   * @param type - 查询类型（session.list/session.detail/session.messages 等）。
+   * @param payload - 应答载荷。
+   * @param error - 可选错误说明。
    */
   async fillQueryResult(requestId: string, type: string, payload: unknown, error?: string): Promise<void> {
-    if (requestId === '' || requestId === undefined) return
+    if (requestId === '') return
     const token = await this.bearerToken().catch(() => undefined)
     if (token === undefined) return
     const body = { requestId, type, payload, ...(error === undefined ? {} : { error }) }
@@ -474,6 +509,7 @@ export class KestraSessionSyncClient {
    * §3.3 指标事件上报 → POST /api/v1/dsh/metrics（复用现有 report 端点，写 dsh_metrics
    * 聚合表；不落会话全文）。本轮只实现 session_end 会话级聚合（tool_call/approval 级
    * 事件后续随 PC Agent 工具面接入）。上报失败不阻断主链路。
+   * @param metric - 轻量指标事件。
    */
   async reportMetric(metric: MetricEvent): Promise<void> {
     if (metric.type !== 'session_end') return
@@ -528,7 +564,11 @@ export class KestraSessionSyncClient {
     }
   }
 
-  /** Push immediately (realtime mode) or enqueue for the next batch flush. */
+  /**
+   * Push immediately (realtime mode) or enqueue for the next batch flush.
+   * @param snapshot - 会话快照。
+   * @returns realtime 模式返回推送结果；batch 模式入队后返回 undefined。
+   */
   async push(snapshot: SessionSnapshot): Promise<PushResult | undefined> {
     const enriched = { ...snapshot, at: new Date(this.now()).toISOString() }
     if ((this.config.mode ?? 'realtime') === 'batch') {
@@ -546,7 +586,10 @@ export class KestraSessionSyncClient {
     return this.send(enriched)
   }
 
-  /** Drain the batch queue, newest snapshot per session wins. */
+  /**
+   * Drain the batch queue, newest snapshot per session wins.
+   * @returns 本次批量推送的全部结果。
+   */
   async flush(): Promise<PushResult[]> {
     if (this.inFlight || this.queue.length === 0) return []
     this.inFlight = true
@@ -577,7 +620,7 @@ export class KestraSessionSyncClient {
       const response = await this.fetchImpl(url, init)
       // 过期/撤销的 client_credentials token：强制刷新后重试一次
       if (response.status === 401 && this.config.token === undefined && attempt < 2) {
-        return this.send(snapshot, attempt + 1)
+        return await this.send(snapshot, attempt + 1)
       }
       return { ok: response.ok, status: response.status, sessionId: snapshot.sessionId, phase: snapshot.phase }
     } catch {
@@ -592,6 +635,7 @@ export class KestraSessionSyncClient {
     }
   }
 
+  /** 停止批量定时器（插件 dispose/进程退出路径）。 */
   dispose(): void {
     if (this.timer !== undefined) clearInterval(this.timer)
   }
@@ -610,14 +654,23 @@ export interface MirrorSession {
   snapshotEvents?(): ReadonlyArray<{ type: string; data?: unknown }>
 }
 
-/** 会话生命周期事件 → 同步阶段。`turn/end` 按 reason.kind 区分 FAILED/COMPLETED；其余事件不推送。 */
+/**
+ * 会话生命周期事件 → 同步阶段。`turn/end` 按 reason.kind 区分 FAILED/COMPLETED；其余事件不推送。
+ * @param eventType - 会话事件类型。
+ * @param reasonKind - turn/end 的结束原因（error 判失败）。
+ * @returns 对应同步阶段；不产生推送的事件返回 undefined。
+ */
 export function deriveSyncPhase(eventType: string, reasonKind?: string): SessionPhase | undefined {
   if (eventType === 'session/created' || eventType === 'turn/start') return 'running'
   if (eventType === 'turn/end') return reasonKind === 'error' ? 'failed' : 'completed'
   return undefined
 }
 
-/** 由消息列表折叠镜像 state：prompt=首条用户文本，result=末条助手文本（手机端列表摘要/详情页直接消费）。 */
+/**
+ * 由消息列表折叠镜像 state：prompt=首条用户文本，result=末条助手文本（手机端列表摘要/详情页直接消费）。
+ * @param messages - 派生消息列表。
+ * @returns 折叠后的 prompt/result 摘要（无对应文本时缺省）。
+ */
 export function foldSyncState(
   messages: ReadonlyArray<{ role: string; content: unknown }>,
 ): { prompt?: string; result?: string } {
@@ -635,9 +688,13 @@ export function foldSyncState(
   }
 }
 
-/** 从 agent 会话消息派生完整文本轮次（含 PC web 直发轮）——中继会话历史的权威投影。
+/**
+ * 从 agent 会话消息派生完整文本轮次（含 PC web 直发轮）——中继会话历史的权威投影。
  * 运行时插件注入（runtime-context 快照等 source.kind==='plugin' 的 user 消息）不是
- * 真实用户轮次，不进入手机投影。 */
+ * 真实用户轮次，不进入手机投影。
+ * @param messages - 会话消息（含 source 元数据以识别插件注入）。
+ * @returns 用户/助手文本轮次序列。
+ */
 export function deriveHistory(
   messages: ReadonlyArray<{ role: string; content: unknown; source?: unknown }>,
 ): Array<{ role: 'user' | 'assistant'; text: string }> {
@@ -667,24 +724,32 @@ function textBlocksOf(content: unknown): string | undefined {
     : Array.isArray(content)
       ? content.map(block =>
         typeof block === 'object' && block !== null && (block as { type?: unknown }).type === 'text'
-          ? String((block as { text?: unknown }).text ?? '')
+          ? (block as { text?: string }).text ?? ''
           : '')
       : []
   const text = blocks.join('').trim()
   return text === '' ? undefined : text
 }
 
-/** Kestra dsh_session.id 是 uuid 列（`?::uuid` 强校验）。本地 `session-<uuid>` 剥前缀上线；其余形态无法落库。 */
+/**
+ * Kestra dsh_session.id 是 uuid 列（`?::uuid` 强校验）。本地 `session-<uuid>` 剥前缀上线；其余形态无法落库。
+ * @param localId - 本地会话 id。
+ * @returns 可落库的 uuid；无法落库时返回 undefined。
+ */
 export function wireSessionId(localId: string): string | undefined {
   const bare = localId.startsWith('session-') ? localId.slice('session-'.length) : localId
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bare) ? bare : undefined
 }
 
-/** 从事件日志取 PC 端最终会话标题（手机端以 PC 端为准，严格镜像其显示）：
+/**
+ * 从事件日志取 PC 端最终会话标题（手机端以 PC 端为准，严格镜像其显示）：
  * 从后往前找最后一条 session/title——仅当 source.kind==='provider'（LLM 生成）
  * 才返回标题；fallback 标题就是首条用户消息（prompt），无增量信息，此时返回
  * undefined 让手机端继续用 title 回退 prompt（fallback 标题即 prompt），
- * 与 PC 端 fallback 显示一致。 */
+ * 与 PC 端 fallback 显示一致。
+ * @param events - 规范事件日志。
+ * @returns PC 端最终标题；无 provider 生成标题时返回 undefined。
+ */
 export function deriveTitleFromLog(
   events: ReadonlyArray<{ type: string; data?: unknown }>,
 ): string | undefined {
@@ -694,8 +759,8 @@ export function deriveTitleFromLog(
     if (event.type !== 'session/title') continue
     const data = event.data as { title?: unknown; source?: { kind?: unknown } } | undefined
     const source = data?.source
-    if (typeof source === 'object' && source !== null && source.kind === 'provider') {
-      const title = typeof data?.title === 'string' ? data.title.trim() : ''
+    if (data !== undefined && typeof source === 'object' && source.kind === 'provider') {
+      const title = typeof data.title === 'string' ? data.title.trim() : ''
       return title === '' ? undefined : title
     }
     return undefined
@@ -703,7 +768,11 @@ export function deriveTitleFromLog(
   return undefined
 }
 
-/** 从事件日志末尾推导会话当前阶段：最后一条 turn 边决定（恢复/进程重启后的 created 通告走这里）。 */
+/**
+ * 从事件日志末尾推导会话当前阶段：最后一条 turn 边决定（恢复/进程重启后的 created 通告走这里）。
+ * @param events - 规范事件日志。
+ * @returns 推导出的同步阶段（缺省 running）。
+ */
 export function deriveSessionPhaseFromLog(
   events: ReadonlyArray<{ type: string; data?: unknown }>,
 ): SessionPhase {
@@ -741,7 +810,7 @@ export class SessionIndex {
     if (filePath === undefined) return
     this.load()
     // 防抖落盘：会话事件流密集时合并写；2s 间隔 + 退出时强制 flush。
-    this.flushTimer = setInterval(() => this.flush(), 2000)
+    this.flushTimer = setInterval(() => { this.flush() }, 2000)
   }
 
   /** 启动恢复：从快照文件重建索引（PC 重启后会话仍可见）。 */
@@ -751,6 +820,7 @@ export class SessionIndex {
       const parsed = JSON.parse(raw) as Array<IndexedSession>
       if (!Array.isArray(parsed)) return
       for (const s of parsed) {
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- s comes from a parsed JSON index file; keep the runtime guard
         if (s?.sessionId !== undefined && s?.phase !== undefined) {
           this.sessions.set(s.sessionId, s)
         }
@@ -789,13 +859,17 @@ export class SessionIndex {
     this.flush()
   }
 
-  /** 观测入口：会话创建/事件驱动，阶段按事件日志末尾推导。 */
+  /**
+   * 观测入口：会话创建/事件驱动，阶段按事件日志末尾推导。
+   * @param session - 镜像会话（手机端查询面的数据源）。
+   * @param workspace - 可选工作区归属（标题/工作区 id）。
+   */
   upsert(session: MirrorSession, workspace?: { workspaceId: string; title: string }): void {
     if (session.header.parentSession !== undefined) return
     const sessionId = wireSessionId(session.id)
     if (sessionId === undefined) return
     const events = session.events ?? session.snapshotEvents?.() ?? []
-    const phase = deriveSessionPhaseFromLog(events) ?? 'running'
+    const phase = deriveSessionPhaseFromLog(events)
     const derived = session.deriveMessages?.() ?? []
     const prev = this.sessions.get(sessionId)
     // 消息轮次的权威投影：与 record 共用 deriveHistory，保证
@@ -806,7 +880,7 @@ export class SessionIndex {
     const projected = deriveHistory(derived)
     const history = projected.length > 0
       ? projected
-      : (Array.isArray(prev?.state?.history) ? prev.state.history : undefined)
+      : (Array.isArray(prev?.state.history) ? prev.state.history : undefined)
     const state = {
       source: 'dsh-pc-web',
       ...foldSyncState(derived),
@@ -821,7 +895,7 @@ export class SessionIndex {
       updatedAt: now,
       // 会话标题以 PC 端为准：PC 有 LLM 生成标题（provider）则镜像为 title，
       // 否则保持 prompt（fallback 标题即首条用户消息，无增量信息）。
-      title: deriveTitleFromLog(events) ?? String(state.prompt ?? '（无摘要）').slice(0, 90),
+      title: deriveTitleFromLog(events) ?? (state.prompt ?? '（无摘要）').slice(0, 90),
       ...(workspace === undefined ? {} : { workspace }),
       state,
     })
@@ -832,6 +906,8 @@ export class SessionIndex {
    * 会话列表（按 updatedAt 倒序），供 session.list 应答。传 since 时只返回
    * updatedAt 晚于该时间线的会话（手机增量轮询）。列表投影不携带 state
    * （含聊天记录全文）——记录由手机进入详情后经 session.messages 按游标增量读取。
+   * @param since - 时间线游标（ISO 时间串）；缺省返回全部。
+   * @returns 会话投影列表（不含 state 全文）。
    */
   list(since?: string): Array<Record<string, unknown>> {
     // 方案 A：索引主键即手机/PC 双端一致的 sessionId，无孪生别名（headless 已退役）。
@@ -845,17 +921,26 @@ export class SessionIndex {
       })
   }
 
-  /** 会话详情，供 session.detail 应答。 */
+  /**
+   * 会话详情，供 session.detail 应答。
+   * @param sessionId - 会话 id。
+   * @returns 完整会话投影；不存在时返回 undefined。
+   */
   get(sessionId: string): Record<string, unknown> | undefined {
     const s = this.sessions.get(sessionId)
     return s === undefined ? undefined : { ...s }
   }
 
-  /** 按 PC history 序号返回增量消息；序号从 1 开始，afterSeq 表示已消费前缀长度。 */
+  /**
+   * 按 PC history 序号返回增量消息；序号从 1 开始，afterSeq 表示已消费前缀长度。
+   * @param sessionId - 会话 id。
+   * @param afterSeq - 已消费消息序号（游标）。
+   * @returns 增量消息响应（含 nextSeq/标题/前缀指纹）；会话不存在时返回 undefined。
+   */
   messages(sessionId: string, afterSeq: number): Record<string, unknown> | undefined {
     const session = this.sessions.get(sessionId)
     if (session === undefined) return undefined
-    const history = Array.isArray(session.state?.history)
+    const history = Array.isArray(session.state.history)
       ? session.state.history.filter((item): item is { role: 'user' | 'assistant'; text: string } => (
         typeof item === 'object' && item !== null
           && ((item as { role?: unknown }).role === 'user' || (item as { role?: unknown }).role === 'assistant')
@@ -886,6 +971,7 @@ export class SessionIndex {
   /**
    * 记录远程输入执行结果（live agent 轮次由插件回调写入本索引，同 id 以最新结果
    * 覆盖并保留既有 state）。
+   * @param info - 执行结果（阶段/prompt/result/派生历史/标题等）。
    */
   record(info: {
     sessionId: string
@@ -906,7 +992,7 @@ export class SessionIndex {
         && ((item as { role?: unknown }).role === 'user' || (item as { role?: unknown }).role === 'assistant')
         && typeof (item as { text?: unknown }).text === 'string'
     )
-    const previousHistory = Array.isArray(prev?.state?.history)
+    const previousHistory = Array.isArray(prev?.state.history)
       ? prev.state.history.filter(validHistoryEntry)
       : []
     // live agent 的完整对话（含 PC web 直发轮次）是权威历史：非空时取代旧累计，
@@ -930,7 +1016,7 @@ export class SessionIndex {
       pendingInput: false,
       createdAt: prev?.createdAt ?? now,
       updatedAt: now,
-      title: info.title ?? prev?.title ?? String(info.prompt ?? '（无摘要）').slice(0, 90),
+      title: info.title ?? prev?.title ?? info.prompt.slice(0, 90),
       ...(workspace === undefined ? {} : { workspace }),
       state: {
         source: 'dsh-pc-web',

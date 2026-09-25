@@ -11,6 +11,9 @@ import { NacosConfigClient, type NacosConfigClientOptions } from './core.ts'
 export const name = 'nacos-config'
 export const inject: string[] = []
 
+/**
+ * 插件配置：继承 {@link NacosConfigClientOptions} 全部连接/认证参数，追加磁盘缓存目录。
+ */
 export interface Config extends NacosConfigClientOptions {
   /** 配置磁盘缓存目录（默认 ~/.dsh/config-cache） */
   cacheDir?: string

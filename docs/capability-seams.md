@@ -20,6 +20,8 @@ flowchart LR
   svc_connection["ctx.connection<br/>Authenticated browser transport"]
   pkg_api_gateway["api-gateway"]
   pkg_host_frontend_static["host-frontend-static"]
+  svc_webIdentity["ctx.webIdentity<br/>Retained web-identity sign-in for the browser Host"]
+  pkg_plugin_kestra_sync["plugin-kestra-sync"]
   pkg_mcp_resources["mcp-resources"]
   svc_mcpResources["ctx.mcpResources<br/>Scoped MCP resource access"]
   pkg_mcp_client["mcp-client"]
@@ -294,6 +296,7 @@ flowchart LR
   pkg_bash_sandbox --> svc_shell
   pkg_browser_use --> svc_browserUse
   pkg_client_connection --> svc_connection
+  pkg_client_connection --> svc_webIdentity
   pkg_client_file_upload --> svc_fileUploads
   pkg_client_modules --> svc_clientModules
   pkg_client_ui_plugin_manager --> svc_pluginRegistryProbe
@@ -554,6 +557,8 @@ flowchart LR
   svc_typert --> pkg_typert_loader
   svc_userQuestions --> pkg_tool_ask_user
   svc_web --> pkg_tool_web
+  svc_webIdentity --> pkg_client_connection
+  svc_webIdentity --> pkg_plugin_kestra_sync
   svc_webServer --> pkg_client_connection
   svc_webServer --> pkg_client_hmr
   svc_webServer --> pkg_client_modules
@@ -572,6 +577,7 @@ flowchart LR
 | `ctx.pluginManager` | `core` | [`plugin-manager`](../packages/boot/plugin-manager) | - | [`plugin-manager`](../packages/boot/plugin-manager), `ui-settings-plugin-inventory` | - | Shares profile package operations with the CLI and reports persisted and running state to Web and agent callers. |
 | `ctx.profileContext` | `core` | [`app-boot`](../packages/boot/app-boot) | - | [`plugin-manager`](../packages/boot/plugin-manager) | - | The dsh launcher supplies data-only profile locations and composition inputs; reload scheduling belongs to dsh-hmr. |
 | `ctx.connection` | `core` | [`client-connection`](../packages/client/connection) | - | [`api-gateway`](../packages/api/gateway), [`host-frontend-static`](../packages/host/frontend-static) | - | Owns browser authentication and shared HTTP request dispatch; API adapters register endpoints and streams. |
+| `ctx.webIdentity` | `core` | [`client-connection`](../packages/client/connection) | - | [`client-connection`](../packages/client/connection), [`plugin-kestra-sync`](../packages/integration/plugin-kestra-sync) | - | Persists the browser OIDC sign-in tokens and keeps them alive by refresh; the phone-input relay (kestra-sync auth=web-identity) consumes it instead of a second daemon-side login. |
 | `ctx.mcpResources` | `seam` | [`mcp-resources`](../packages/mcp/mcp-resources) | [`mcp-client`](../packages/mcp/mcp-client) | [`mcp-resources`](../packages/mcp/mcp-resources) | - | Connection-owned providers serve shared resource tools in the calling agent scope. |
 | `ctx.browserUse` | `seam` | [`browser-use`](../packages/browser-use/browser-use) | [`experimental-browser-use-playwright-mcp`](../packages/experimental/browser-use-playwright-mcp), [`experimental-browser-use-chrome-devtools-mcp`](../packages/experimental/browser-use-chrome-devtools-mcp), [`experimental-browser-use-stagehand-native`](../packages/experimental/browser-use-stagehand-native) | [`experimental-browser-use-playwright-mcp`](../packages/experimental/browser-use-playwright-mcp), [`experimental-browser-use-chrome-devtools-mcp`](../packages/experimental/browser-use-chrome-devtools-mcp), [`experimental-browser-use-stagehand-native`](../packages/experimental/browser-use-stagehand-native) | - | One provider-owned name per service instance. Providers own their tools and browser resources per live Session; the shared service has no browser operation API. |
 | `ctx.computerUse` | `seam` | [`computer-use`](../packages/computer-use/computer-use) | [`experimental-computer-use-cua-driver-mcp`](../packages/experimental/computer-use-cua-driver-mcp), [`experimental-computer-use-cua-driver-native`](../packages/experimental/computer-use-cua-driver-native) | [`experimental-computer-use-cua-driver-mcp`](../packages/experimental/computer-use-cua-driver-mcp), [`experimental-computer-use-cua-driver-native`](../packages/experimental/computer-use-cua-driver-native) | - | One provider-owned name per service instance. Each provider also owns its model tools; the service has no common action API, runtime selection, or Session workflow lock. |

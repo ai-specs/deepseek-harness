@@ -1,21 +1,23 @@
 # patches/
 
-对 deepseek-harness 上游配置文件的最小修改补丁（monorepo 兼容层）。
+English | [中文](README.zh.md)
+
+Minimal patches to upstream deepseek-harness configuration files (the monorepo compatibility layer).
 
 ## 0001-monorepo-compat.patch
 
-- 根 package.json：`name` 改为 `app-dsh`（monorepo 检查要求 name=目录名），新增 `dev`/`start` 脚本
-- tsconfig.host.json：references 数组新增 4 个 dsh 插件包（integration/plugin-kestra-sync、integration/plugin-nacos-config、guard/plugin-fault-tolerance、guard/plugin-runtime-guard）
+- Root `package.json`: `name` changed to `app-dsh` (the monorepo check requires name = directory name), plus `dev`/`start` scripts.
+- `tsconfig.host.json`: four dsh plugin packages added to the references array (integration/plugin-kestra-sync, integration/plugin-nacos-config, guard/plugin-fault-tolerance, guard/plugin-runtime-guard).
 
-## 上游更新后重新应用
+## Reapplying after an upstream update
 
 ```bash
 cd app-dsh
 git fetch upstream
-git rebase upstream/master          # 或 merge
-# 冲突点仅两处：package.json 的 name/scripts、tsconfig.host.json 的 references 数组（约 4 行）
-git apply patches/0001-monorepo-compat.patch   # 如补丁尚未包含在分支中
+git rebase upstream/master          # or merge
+# Only two conflict points: package.json name/scripts, and the tsconfig.host.json references array (~4 lines)
+git apply patches/0001-monorepo-compat.patch   # if the patch is not already in the branch
 pnpm install && CI=true pnpm run build && pnpm exec vitest run packages/integration packages/guard
 ```
 
-插件目录（packages/ 下新增的四个 dsh 插件）为纯新增，永远不需要与上游合并。
+The plugin directories (the four dsh plugins added under packages/) are pure additions and never need to merge with upstream.

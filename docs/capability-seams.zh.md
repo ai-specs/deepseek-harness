@@ -22,6 +22,8 @@ flowchart LR
   svc_connection["ctx.connection<br/>Authenticated browser transport"]
   pkg_api_gateway["api-gateway"]
   pkg_host_frontend_static["host-frontend-static"]
+  svc_webIdentity["ctx.webIdentity<br/>Retained web-identity sign-in for the browser Host"]
+  pkg_plugin_kestra_sync["plugin-kestra-sync"]
   pkg_mcp_resources["mcp-resources"]
   svc_mcpResources["ctx.mcpResources<br/>Scoped MCP resource access"]
   pkg_mcp_client["mcp-client"]
@@ -296,6 +298,7 @@ flowchart LR
   pkg_bash_sandbox --> svc_shell
   pkg_browser_use --> svc_browserUse
   pkg_client_connection --> svc_connection
+  pkg_client_connection --> svc_webIdentity
   pkg_client_file_upload --> svc_fileUploads
   pkg_client_modules --> svc_clientModules
   pkg_client_ui_plugin_manager --> svc_pluginRegistryProbe
@@ -556,6 +559,8 @@ flowchart LR
   svc_typert --> pkg_typert_loader
   svc_userQuestions --> pkg_tool_ask_user
   svc_web --> pkg_tool_web
+  svc_webIdentity --> pkg_client_connection
+  svc_webIdentity --> pkg_plugin_kestra_sync
   svc_webServer --> pkg_client_connection
   svc_webServer --> pkg_client_hmr
   svc_webServer --> pkg_client_modules
@@ -574,6 +579,7 @@ flowchart LR
 | `ctx.pluginManager` | `core` | [`plugin-manager`](../packages/boot/plugin-manager) | - | [`plugin-manager`](../packages/boot/plugin-manager), `ui-settings-plugin-inventory` | - | 与 CLI 共享 profile 包操作，并向 Web 和 Agent 调用方分别报告持久状态与运行状态。 |
 | `ctx.profileContext` | `core` | [`app-boot`](../packages/boot/app-boot) | - | [`plugin-manager`](../packages/boot/plugin-manager) | - | dsh launcher 提供纯数据形式的 profile 位置与组合输入；重载调度由 dsh-hmr 负责。 |
 | `ctx.connection` | `core` | [`client-connection`](../packages/client/connection) | - | [`api-gateway`](../packages/api/gateway), [`host-frontend-static`](../packages/host/frontend-static) | - | 负责浏览器认证与共享 HTTP 请求分发；API 适配器注册端点和流。 |
+| `ctx.webIdentity` | `core` | [`client-connection`](../packages/client/connection) | - | [`client-connection`](../packages/client/connection), [`plugin-kestra-sync`](../packages/integration/plugin-kestra-sync) | - | 持久化浏览器 OIDC 登录令牌并靠刷新保活；手机输入中继（kestra-sync auth=web-identity）消费它而不是进行第二次守护进程侧登录。 |
 | `ctx.mcpResources` | `seam` | [`mcp-resources`](../packages/mcp/mcp-resources) | [`mcp-client`](../packages/mcp/mcp-client) | [`mcp-resources`](../packages/mcp/mcp-resources) | - | 连接所有者提供的操作在调用 agent 的作用域内服务于共享资源工具。 |
 | `ctx.browserUse` | `seam` | [`browser-use`](../packages/browser-use/browser-use) | [`experimental-browser-use-playwright-mcp`](../packages/experimental/browser-use-playwright-mcp), [`experimental-browser-use-chrome-devtools-mcp`](../packages/experimental/browser-use-chrome-devtools-mcp), [`experimental-browser-use-stagehand-native`](../packages/experimental/browser-use-stagehand-native) | [`experimental-browser-use-playwright-mcp`](../packages/experimental/browser-use-playwright-mcp), [`experimental-browser-use-chrome-devtools-mcp`](../packages/experimental/browser-use-chrome-devtools-mcp), [`experimental-browser-use-stagehand-native`](../packages/experimental/browser-use-stagehand-native) | - | 每个服务实例注册一个提供方拥有的名称。提供方按实时 Session 拥有自己的工具与浏览器资源；共享服务不提供浏览器操作 API。 |
 | `ctx.computerUse` | `seam` | [`computer-use`](../packages/computer-use/computer-use) | [`experimental-computer-use-cua-driver-mcp`](../packages/experimental/computer-use-cua-driver-mcp), [`experimental-computer-use-cua-driver-native`](../packages/experimental/computer-use-cua-driver-native) | [`experimental-computer-use-cua-driver-mcp`](../packages/experimental/computer-use-cua-driver-mcp), [`experimental-computer-use-cua-driver-native`](../packages/experimental/computer-use-cua-driver-native) | - | 每个服务实例只注册一个提供方自定的名称。各提供方也拥有自己的模型工具；服务不提供通用操作 API、运行时选择或 Session 流程锁。 |

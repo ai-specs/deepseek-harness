@@ -74,6 +74,7 @@ export class WebIdentityService extends Service {
    * Whether a sign-in exists and is not known-dead. A present record with a
    * refresh token counts as alive even past expiry — the chain has not been
    * observed broken; only a failed refresh (or explicit clear/logout) kills it.
+   * @returns 是否存在存活的身份。
    */
   alive(): boolean {
     return this.payload !== undefined
@@ -81,12 +82,19 @@ export class WebIdentityService extends Service {
         || this.payload.refreshToken !== undefined)
   }
 
-  /** The signed-in user's OIDC sub, once loaded. */
+  /**
+   * The signed-in user's OIDC sub, once loaded.
+   * @returns 当前登录用户的 OIDC sub；未加载/未登录时返回 undefined。
+   */
   currentSub(): string | undefined {
     return this.payload?.sub
   }
 
-  /** Observe login/logout identity transitions (tokens refreshed for the same sub are ignored). */
+  /**
+   * Observe login/logout identity transitions (tokens refreshed for the same sub are ignored).
+   * @param listener - 身份变化回调（登出时 sub 为 undefined）。
+   * @returns 注销订阅的清理函数。
+   */
   onChange(listener: (sub: string | undefined) => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
@@ -98,7 +106,10 @@ export class WebIdentityService extends Service {
     for (const listener of this.listeners) listener(nextSub)
   }
 
-  /** Persist the tokens minted by a completed browser sign-in. */
+  /**
+   * Persist the tokens minted by a completed browser sign-in.
+   * @param payload - 待持久化的身份载荷。
+   */
   async save(payload: WebIdentityPayload): Promise<void> {
     const previousSub = this.payload?.sub
     this.payload = payload
@@ -120,6 +131,7 @@ export class WebIdentityService extends Service {
    * stored refresh token) when the current one is within its expiry margin.
    * Resolves undefined when nobody is signed in or the refresh chain broke —
    * callers treat that as "relay idle until the browser signs in again".
+   * @returns 可用的 access token；未登录或刷新链断裂时返回 undefined。
    */
   async ensureAccessToken(): Promise<string | undefined> {
     await this.ensureLoaded()

@@ -5,46 +5,90 @@ kind: "package-bundle"
 
 # @deepseek-ai/dsh-plugin-kestra-sync
 
-## Summary
+English | [中文](README.zh.md)
 
 dsh-kestra-sync：会话同步客户端（dsh.docx 拓扑中的 `dsh(PC) ←会话同步→ Kestra`）。
 
-- dsh(PC) 无公网 IP，本插件**只主动外连** Kestra API，不监听任何端口
-- 触发时机：会话开始 / 每完成一个子任务 / 高风险决策点（pending_approval）/ 会话结束
-- 推送内容：sessionId、phase（running/pending_approval/completed/failed）、历史摘要、工具调用记录、Token 消耗、耗时
+## Summary
+
+Outbound-only session-sync client pushing dsh(PC) session snapshots to Kestra: session start, subagent completion, high-risk decision points (pending approval), and session end. Supports realtime and batch push modes, plus web-identity authenticated phone-input relay integration. The plugin listens on no port.
 
 ## Table of Contents
 
-- [Summary](#summary)
+- [Use this package](#use-this-package)
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Dev Note](#dev-note)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 
+-----
+
+<a id="use-this-package"></a>
+## Use this package
+
+The plugin mounts with the profile that ships it and starts pushing session snapshots on the lifecycle triggers; no per-call wiring is required. Because dsh(PC) has no public IP, the plugin only ever connects out to the Kestra API.
+
+### When to choose it
+
+Use it in any deployment where Kestra is the observation center and dsh(PC) must report session lifecycle, token usage, and pending-approval decision points without exposing a listening port.
+
+### Minimal configuration
+
+Point the plugin at the Kestra API with `baseUrl` and a bearer `token`; realtime mode is the default. For phone-input relay, set `auth: 'web-identity'` so the client authenticates with the retained browser OIDC identity instead of a daemon-side login.
+
+<a id="configuration"></a>
+## Configuration
+
+| Field | Default | Meaning |
+|---|---|---|
+| `baseUrl` | required | Kestra API base URL, e.g. `http://kestra.internal:8080`. |
+| `token` | required | Bearer token for the API gateway (unused when `auth: 'web-identity'`). |
+| `auth` | `token` | `token` (gateway bearer) or `web-identity` (retained browser OIDC identity). |
+| `tenant` | `main` | Kestra 2.x tenant. |
+| `mode` | `realtime` | `realtime` pushes immediately; `batch` coalesces within `batchIntervalMs`. |
+| `batchIntervalMs` | `2000` | Batch flush interval in milliseconds. |
+| `timeoutMs` | `5000` | Per-push timeout in milliseconds. |
+
+<a id="usage"></a>
+## Usage
+
+The client is constructed once and pushes session snapshots from lifecycle triggers:
+
+```ts
+import { KestraSessionSyncClient } from '@deepseek-ai/dsh-plugin-kestra-sync'
+
+const client = new KestraSessionSyncClient({ baseUrl: 'http://kestra:8080', token: 'gateway-token' })
+await client.push({ sessionId: 's-1', phase: 'pending_approval', approval: { approvalType: 'refund' } })
+```
+
+<a id="dev-note"></a>
 ## Dev Note
 
 - Tests live in `tests/`; keep the plugin outbound-only and dependency-free at runtime.
+- The PKCE/web-identity machinery lives in this package; the retained identity record itself is owned by `client-connection`.
 
+<a id="model-experience"></a>
+## Model Experience
 
-dsh-kestra-sync：会话同步客户端（dsh.docx 拓扑中的 `dsh(PC) ←会话同步→ Kestra`）。
+### Session snapshot sync
 
-- dsh(PC) 无公网 IP，本插件**只主动外连** Kestra API，不监听任何端口
-- 触发时机：会话开始 / 每完成一个子任务 / 高风险决策点（pending_approval）/ 会话结束
-- 推送内容：sessionId、phase（running/pending_approval/completed/failed）、历史摘要、工具调用记录、Token 消耗、耗时
+#### What the model sees
 
+Nothing directly. Snapshots are produced from the session log for the Kestra API and never enter model context; the retained identity record is owned by `client-connection`.
 
-| 字段 | 默认 | 说明 |
-|---|---|---|
-| baseUrl | 必填 | Kestra API 地址，如 `http://kestra.internal:8080` |
-| token | 必填 | API 网关 Bearer token |
-| tenant | `main` | Kestra 2.x 租户 |
-| mode | `realtime` | `realtime` 即时推送；`batch` 按 `batchIntervalMs` 合并推送 |
-| batchIntervalMs | `2000` | 批量刷新间隔 |
-| timeoutMs | `5000` | 单次推送超时 |
+#### Token effect
 
+None. Snapshot construction reads persisted state without adding model-visible tokens.
 
-```ts
-import { KestraSessionSyncClient } from '@deepseek-ai/dsh-plugin-kestra-sync/core'
+#### KV Cache effect
 
-const client = new KestraSessionSyncClient({ baseUrl: 'http://kestra:8080', token })
-await client.push({ sessionId: 's-1', phase: 'pending_approval', approval: { approvalType: 'refund' } })
-```
+None. No request prefix or schema change is introduced.
+
+## Known Limitations and Deferred Work
+
+<a id="known-limitations-and-deferred-work"></a>
+
+- Outbound-only by design: if the Kestra API is unreachable, snapshots are dropped silently rather than retried indefinitely (a failed push never blocks the session).
+- PKCE sign-in state is in-process memory: a `dsh web` restart expires an in-flight browser sign-in, which the user retries.
+- Batch mode coalesces by wall-clock interval, not by event count or size; very high event rates can grow a batch buffer.

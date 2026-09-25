@@ -61,14 +61,14 @@ COPY website website
 # 即镜像失败。
 # install 用 --ignore-scripts 保证网络鲁棒性；原生模块的 install 脚本（node-gyp）
 # 在此显式补跑。历史上 fs-ext（上游 session write-ownership lease）必须在此编译；
-# 上游 d927cbff99（+852 合并内）以预编译 flock（native/system bin/*/system.node，
+# 上游（+852 合并内）以预编译 flock（native/system bin/*/system.node，
 # 由下方 prebuilds 段组装+验证）替代后，安装树可以合法地不含 fs-ext——存在则必须
 # 编译成功并验证产物（target_name=fs_ext → build/Release/fs_ext.node），缺席则
 # 显式声明（不再静默空转）。
 RUN set -eux; \
     dirs=$(find /app/node_modules/.pnpm -maxdepth 1 -name 'fs-ext@*' -type d); \
     if [ -z "$dirs" ]; then \
-      echo 'fs-ext absent from install tree (superseded by prebuilt flock, upstream d927cbff99) — nothing to build'; \
+      echo 'fs-ext absent from install tree (superseded by prebuilt flock, upstream merge +852) — nothing to build'; \
     else \
       for d in $dirs; do \
         (cd "$d/node_modules/fs-ext" && npx node-gyp rebuild); \

@@ -75,6 +75,11 @@ export interface RunTallies {
   startedAt: number
 }
 
+/**
+ * 初始化一次进程观测的统计结构（one-shot run 只观测一个 agent）。
+ * @param startedAt - 起始时间戳（默认 Date.now()）。
+ * @returns 统计结构。
+ */
 export function createTallies(startedAt = Date.now()): RunTallies {
   return {
     turns: new Set<number>(),
@@ -90,7 +95,11 @@ export function createTallies(startedAt = Date.now()): RunTallies {
   }
 }
 
-/** Fold one session event into the tallies; exports for tests. */
+/**
+ * Fold one session event into the tallies; exports for tests.
+ * @param tallies - 观测统计结构。
+ * @param event - 会话事件（turn/tool/assistant 等）。
+ */
 export function observeEvent(tallies: RunTallies, event: SessionEvent): void {
   switch (event.type) {
     case 'turn/start':
@@ -131,7 +140,12 @@ export function observeEvent(tallies: RunTallies, event: SessionEvent): void {
   }
 }
 
-/** Project the tallies onto the /result.json payload; exports for tests. */
+/**
+ * Project the tallies onto the /result.json payload; exports for tests.
+ * @param tallies - 观测统计结构。
+ * @param timedOut - 是否因 DSH_TIMEOUT 到期写部分结果（true 时 success=false 且 error=部分结果说明）。
+ * @returns 结构化结果载荷（kestra-sync relay 上报读它）。
+ */
 export function projectResult(tallies: RunTallies, timedOut = false): RunResultPayload {
   const iterations = tallies.turns.size
   return {

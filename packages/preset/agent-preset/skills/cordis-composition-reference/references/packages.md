@@ -232,6 +232,8 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 
 | Package | Config | Description |
 |---|---|---|
+| `@deepseek-ai/dsh-plugin-fault-tolerance` | yes | dsh local guard plugin (fault-tolerance) — golden-indicator protection per dsh.docx |
+| `@deepseek-ai/dsh-plugin-runtime-guard` | yes | dsh local guard plugin (runtime-guard) — golden-indicator protection per dsh.docx |
 | `@deepseek-ai/dsh-repeat-tool-reminder` | yes | Repeat-tool-call guard plugin: advisory reminders when an agent loops on identical tool calls |
 | `@deepseek-ai/dsh-tool-call-timeout-policy` | no | Tool-call timeout policy: a tools/execute wrapper that arms a per-tool deadline on exec.signal and returns TOOL_TIMEOUT when it wins |
 
@@ -254,6 +256,14 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-host-plugin-inventory` | no | Read-only Remote projection of current Cordis Loader plugin state |
 | `@deepseek-ai/dsh-host-product-telemetry-otel` | yes | Explicit product usage events exported through OpenTelemetry HTTP logs |
 | `@deepseek-ai/dsh-host-webserver` | yes | Web route-registration plugin: HTTP and upgrade routes, index transform taps, and static dist fallback; knows no harness concepts |
+
+## integration
+
+| Package | Config | Description |
+|---|---|---|
+| `@deepseek-ai/dsh-plugin-kestra-run` | yes | dsh headless one-shot observer (PC 端 remote-input 派生会话): env-driven model/tool selection, tool allowlist guard, and the structured result contract for kestra-sync reporting |
+| `@deepseek-ai/dsh-plugin-kestra-sync` | yes | Pushes dsh (PC) session state snapshots to Kestra — session sync client for the dsh.docx topology |
+| `@deepseek-ai/dsh-plugin-nacos-config` | yes | Nacos configuration client for dsh — config pull, long-listen, and skill-package registry sync |
 
 ## interaction
 

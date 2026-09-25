@@ -1,0 +1,13 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write patches/README.md
+/patches:
+  en: b32ec5e145442ab8
+  zh: 0ceb3ccfc2c3f270
+/patches/0001-monorepo-compat-patch:
+  en: 11a36c7e7c5b7a9b
+  zh: dd0c1e410158e957
+/patches/reapplying-after-an-upstream-update:
+  en: 805c7f45c4fffdf9
+  zh: 87cffde62d7f42ea

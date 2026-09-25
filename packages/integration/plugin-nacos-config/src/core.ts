@@ -13,6 +13,9 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 
+/**
+ * Nacos 配置客户端选项：连接、认证与轮询参数。
+ */
 export interface NacosConfigClientOptions {
   /** Nacos v3 控制台地址（API 与控制台同端口），e.g. http://nacos.internal:18480 */
   server: string
@@ -43,6 +46,7 @@ export interface NacosConfigClientOptions {
   dataIds?: string[]
 }
 
+/** 默认跟踪的 6 个 dsh Data ID（工具/权限/容错/上下文/技能/提示词）。 */
 export const DEFAULT_DATA_IDS = [
   'dsh-tools.yaml',
   'dsh-permission.yaml',
@@ -52,8 +56,12 @@ export const DEFAULT_DATA_IDS = [
   'dsh-prompt.yaml',
 ] as const
 
+/** 默认配置分组。 */
 export const DEFAULT_GROUP = 'DEFAULT_GROUP'
 
+/**
+ * 技能包注册表条目（dsh-skills.yaml 解析产物）。
+ */
 export interface SkillPackage {
   name: string
   version: string
@@ -66,11 +74,18 @@ function url(base: string, params: Record<string, string>): string {
   return `${base.replace(/\/+$/, '')}/v3/console/cs/config?${qs}`
 }
 
-/** Nacos config MD5 semantics: uppercase md5 of the UTF-8 content. */
+/**
+ * Nacos config MD5 semantics: uppercase md5 of the UTF-8 content.
+ * @param content - 配置内容。
+ * @returns 大写 MD5（与 Nacos 端校验一致）。
+ */
 export function contentMd5(content: string): string {
   return createHash('md5').update(content, 'utf8').digest('hex').toUpperCase()
 }
 
+/**
+ * Nacos 配置客户端：拉取 Data ID、MD5 变更检测、热更新本地缓存与技能包注册表。
+ */
 export class NacosConfigClient {
   private readonly cache = new Map<string, { md5: string; parsed: unknown; raw: string }>()
   private timer: ReturnType<typeof setInterval> | undefined
@@ -114,7 +129,7 @@ export class NacosConfigClient {
         const raw = readFileSync(yamlPath, 'utf8')
         const storedMd5 = readFileSync(md5Path, 'utf8').trim()
         if (storedMd5 !== contentMd5(raw)) continue // 磁盘内容损坏/被篡改，跳过
-        this.cache.set(dataId, { md5: storedMd5, parsed: (yaml.load(raw) ?? {}) as unknown, raw })
+        this.cache.set(dataId, { md5: storedMd5, parsed: yaml.load(raw) ?? {}, raw })
       } catch {
         // 单个文件损坏不影响其余缓存
       }
@@ -169,7 +184,11 @@ export class NacosConfigClient {
     this.accessToken = data.accessToken
   }
 
-  /** Fetch one config (v3 console API), update memory + disk cache; degraded to disk on failure. */
+  /**
+   * Fetch one config (v3 console API), update memory + disk cache; degraded to disk on failure.
+   * @param dataId - 配置 Data ID。
+   * @returns 解析后的配置；拉取失败且无磁盘缓存时返回 undefined。
+   */
   async fetchConfig<T = unknown>(dataId: string): Promise<T | undefined> {
     let raw: string | undefined
     try {
@@ -195,6 +214,12 @@ export class NacosConfigClient {
     }
   }
 
+  /**
+   * 返回内存缓存中的解析配置（不触发网络请求）。
+   * @param dataId - 配置 Data ID。
+   * @returns 解析后的配置；无缓存时返回 undefined。
+   */
+  // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- public API returns typed config reads
   getCached<T>(dataId: string): T | undefined {
     return this.cache.get(dataId)?.parsed as T | undefined
   }
@@ -234,12 +259,17 @@ export class NacosConfigClient {
     }, this.options.pollIntervalMs ?? 10000)
   }
 
+  /** 停止轮询并清理定时器（插件 dispose 路径）。 */
   stop(): void {
     this.stopping = true
     if (this.timer !== undefined) clearInterval(this.timer)
     this.timer = undefined
   }
 
+  /**
+   * 注册配置变更监听器（MD5 变化时回调 dataId 与解析值）。
+   * @param listener - 配置变更回调。
+   */
   onConfigChange(listener: (dataId: string, parsed: unknown) => void): void {
     this.listeners.add(listener)
   }
@@ -248,6 +278,9 @@ export class NacosConfigClient {
    * Resolve the skill registry (dsh-skills.yaml) and download changed skill
    * bundles into `cacheDir`. Gray-scale: `gray` skills download only when
    * `grayBucket` (0-99) is below the percent; `disabled` never downloads.
+   * @param cacheDir - 技能包下载缓存目录。
+   * @param grayBucket - 灰度桶位（0-99，默认 0）。
+   * @returns 每个技能包的解析/下载结果（cached 表示已就绪）。
    */
   async syncSkillPackages(cacheDir: string, grayBucket = 0): Promise<Array<{ name: string; version: string; cached: boolean }>> {
     const registry = await this.fetchConfig<{ skills?: SkillPackage[] }>('dsh-skills.yaml')

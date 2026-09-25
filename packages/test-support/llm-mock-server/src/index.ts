@@ -207,9 +207,6 @@ function boundedInteger(name: string, value: number, min: number, max: number): 
 
 function resolveOptions(options: MockLlmServerOptions): ResolvedOptions {
   const protocol = options.protocol ?? 'messages'
-  if (protocol !== 'chat-completions' && protocol !== 'messages') {
-    throw new Error('llm-mock-server: protocol must be chat-completions or messages')
-  }
   const host = options.host ?? '127.0.0.1'
   const port = boundedInteger('port', options.port ?? 0, 0, 65_535)
   const chunkSize = boundedInteger('chunkSize', options.chunkSize ?? 8, 1, Number.MAX_SAFE_INTEGER)

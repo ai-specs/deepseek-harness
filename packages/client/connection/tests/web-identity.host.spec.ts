@@ -132,7 +132,7 @@ describe('WebIdentityService', () => {
       if (call === undefined) throw new Error('fetch was not called')
       const [, init] = call
       if (init === undefined) throw new Error('fetch init missing')
-      const body = new URLSearchParams(String(init.body))
+      const body = new URLSearchParams(init.body as string)
       expect(body.get('grant_type')).toBe('refresh_token')
       expect(body.get('refresh_token')).toBe('rt-old')
       // Rotation persisted: the next refresh would use rt-new.

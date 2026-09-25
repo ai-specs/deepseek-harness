@@ -17,8 +17,8 @@ let kestraUp = true
 let nacosUp = true
 let fetchCalls: string[] = []
 
-async function routedFetch(input: any): Promise<Response> {
-  const target = String(input)
+async function routedFetch(input: RequestInfo | URL): Promise<Response> {
+  const target = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url
   fetchCalls.push(target)
   if (target.includes(':18080')) {
     if (!kestraUp) throw new Error('connect ECONNREFUSED')
@@ -48,7 +48,7 @@ describe('离线能力集成（断连 → 降级 → 恢复）', () => {
     const queuePath = join(dir, 'sync-queue.jsonl')
     const sync = new KestraSessionSyncClient(
       { baseUrl: 'http://localhost:18080', token: 't', mode: 'batch', queuePath },
-      routedFetch as unknown as typeof fetch,
+      routedFetch,
     )
     await sync.push(snapshot)
     await sync.push({ ...snapshot, sessionId: 'e2e-2' })
@@ -61,7 +61,7 @@ describe('离线能力集成（断连 → 降级 → 恢复）', () => {
     kestraUp = true
     const recovered = new KestraSessionSyncClient(
       { baseUrl: 'http://localhost:18080', token: 't', mode: 'batch', queuePath },
-      routedFetch as unknown as typeof fetch,
+      routedFetch,
     )
     const results = await recovered.flush()
     expect(results.filter(r => r.ok)).toHaveLength(2)           // 恢复后补推成功
@@ -73,26 +73,26 @@ describe('离线能力集成（断连 → 降级 → 恢复）', () => {
     const cacheDir = join(dir, 'config-cache')
     const warm = new NacosConfigClient(
       { server: 'http://localhost:8848', cacheDir, username: 'n', password: 'p' },
-      routedFetch as unknown as typeof fetch,
+      routedFetch,
     )
     await warm.refreshAll()
-    expect(warm.getCached<any>('dsh-fault-tolerance.yaml')?.retry?.maxAttempts).toBe(4)
+    expect(warm.getCached<{ retry?: { maxAttempts?: number } }>('dsh-fault-tolerance.yaml')?.retry?.maxAttempts).toBe(4)
 
     nacosUp = false
     const degraded = new NacosConfigClient(
       { server: 'http://localhost:8848', cacheDir, username: 'n', password: 'p' },
-      routedFetch as unknown as typeof fetch,
+      routedFetch,
     )
     await degraded.refreshAll()                                  // 不崩溃
-    expect(degraded.getCached<any>('dsh-fault-tolerance.yaml')?.retry?.maxAttempts).toBe(4) // 磁盘缓存兜底
+    expect(degraded.getCached<{ retry?: { maxAttempts?: number } }>('dsh-fault-tolerance.yaml')?.retry?.maxAttempts).toBe(4) // 磁盘缓存兜底
 
     nacosUp = true
     const recovered = new NacosConfigClient(
       { server: 'http://localhost:8848', cacheDir, username: 'n', password: 'p' },
-      routedFetch as unknown as typeof fetch,
+      routedFetch,
     )
     await recovered.refreshAll()
-    expect(recovered.getCached<any>('dsh-fault-tolerance.yaml')?.retry?.maxAttempts).toBe(4) // 恢复后刷新
+    expect(recovered.getCached<{ retry?: { maxAttempts?: number } }>('dsh-fault-tolerance.yaml')?.retry?.maxAttempts).toBe(4) // 恢复后刷新
   })
 
 })

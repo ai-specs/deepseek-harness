@@ -14,6 +14,7 @@ const DAY_MILLISECONDS = 24 * 60 * 60 * 1000
 const SECRET_BYTES = 32
 const TOKEN_QUERY = 'token'
 const COOKIE_PREFIX = 'dsh-auth-'
+/** 浏览器会话 cookie 载荷版本（签名结构与字段契约的版本标识）。 */
 export const COOKIE_PAYLOAD_VERSION = 1
 const STORED_SECRET_VERSION = 1
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]*$/
@@ -35,6 +36,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/**
+ * 将字节数组编码为 cookie-safe base64url（RFC 4648 §5，去 padding）。
+ * @param value - 待编码的字节数组。
+ * @returns base64url 字符串。
+ */
 export function encodeBase64Url(value: Uint8Array): string {
   return Buffer.from(value).toString('base64')
     .replaceAll('+', '-')
@@ -42,6 +48,11 @@ export function encodeBase64Url(value: Uint8Array): string {
     .replace(/=+$/u, '')
 }
 
+/**
+ * 解码 base64url；非法字符/长度或往返不一致时返回 undefined。
+ * @param value - base64url 字符串。
+ * @returns 解码后的 Buffer；非法输入返回 undefined。
+ */
 export function decodeBase64Url(value: string): Buffer | undefined {
   if (!BASE64URL_PATTERN.test(value) || value.length % 4 === 1) return undefined
   const padding = '='.repeat((4 - value.length % 4) % 4)
@@ -57,6 +68,12 @@ function processLaunchToken(owner: object): string {
   return created
 }
 
+/**
+ * 从请求头（Headers 实例或普通对象）中取指定名称的首个值。
+ * @param headers - 请求头集合。
+ * @param name - 头名称。
+ * @returns 首个匹配值；未命中返回 undefined。
+ */
 export function header(
   headers: ConnectionTrustRequest['headers'],
   name: string,
@@ -66,7 +83,11 @@ export function header(
   return typeof value === 'string' ? value : undefined
 }
 
-/** Canonical request authority used as the cookie name and signed audience. */
+/**
+ * Canonical request authority used as the cookie name and signed audience.
+ * @param headers - 请求头（Host 必填）。
+ * @returns 规范化 host（小写、去端口差异）；无法解析时返回 undefined。
+ */
 export function requestAuthority(headers: ConnectionTrustRequest['headers']): string | undefined {
   const host = header(headers, 'host')
   if (host === undefined) return undefined
@@ -103,11 +124,21 @@ function tokenMatches(actual: string, expected: string): boolean {
   return actualBytes.byteLength === expectedBytes.byteLength && timingSafeEqual(actualBytes, expectedBytes)
 }
 
+/**
+ * 由权威 host 派生 cookie 名（前缀 + authority 的 sha256 base64url）。
+ * @param authority - 规范化 host。
+ * @returns 该 host 的 cookie 名。
+ */
 export function cookieName(authority: string): string {
   return COOKIE_PREFIX + encodeBase64Url(createHash('sha256').update(authority).digest())
 }
 
-/** Read the exact generated cookie without implementing general Cookie decoding. */
+/**
+ * Read the exact generated cookie without implementing general Cookie decoding.
+ * @param headerValue - Cookie 头原始值。
+ * @param name - 目标 cookie 名。
+ * @returns 匹配到的 cookie 值；未命中返回 undefined。
+ */
 export function cookieValue(headerValue: string, name: string): string | undefined {
   for (const segment of headerValue.split(';')) {
     const at = segment.indexOf('=')
@@ -117,7 +148,14 @@ export function cookieValue(headerValue: string, name: string): string | undefin
   return undefined
 }
 
-/** Serialize the fixed browser-session attributes; generated names and values are cookie-safe base64url. */
+/**
+ * Serialize the fixed browser-session attributes; generated names and values are cookie-safe base64url.
+ * @param name - cookie 名。
+ * @param value - cookie 值。
+ * @param expiresAt - 过期时间戳（毫秒）。
+ * @param maxAgeSeconds - Max-Age 秒数。
+ * @returns 完整的 Set-Cookie 值。
+ */
 export function sessionCookie(name: string, value: string, expiresAt: number, maxAgeSeconds: number): string {
   return `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; SameSite=Strict`
 }
@@ -126,11 +164,23 @@ function signature(secret: Buffer, body: string): Buffer {
   return createHmac('sha256', secret).update(body).digest()
 }
 
+/**
+ * 编码带 HMAC 签名的浏览器 cookie（v1.payload.signature）。
+ * @param payload - cookie 载荷。
+ * @param secret - 签名密钥。
+ * @returns 三段的 cookie 值字符串。
+ */
 export function encodeCookie(payload: BrowserCookiePayload, secret: Buffer): string {
   const body = encodeBase64Url(Buffer.from(JSON.stringify(payload), 'utf8'))
   return `v1.${body}.${encodeBase64Url(signature(secret, body))}`
 }
 
+/**
+ * 解码并验签浏览器 cookie；结构/签名/字段不合法时返回 undefined。
+ * @param value - cookie 值字符串。
+ * @param secret - 签名密钥。
+ * @returns 验签通过的载荷；任何一步失败返回 undefined。
+ */
 export function decodeCookie(value: string, secret: Buffer): BrowserCookiePayload | undefined {
   const parts = value.split('.')
   const [version, body, encodedSignature] = parts
@@ -158,6 +208,11 @@ export function decodeCookie(value: string, secret: Buffer): BrowserCookiePayloa
   return decoded as unknown as BrowserCookiePayload
 }
 
+/**
+ * 初始化（或复用）本 Harness home 的浏览器会话签名密钥并返回。
+ * @param credentials - 持久化凭证提供者。
+ * @returns 签名密钥（Buffer）。
+ */
 export async function initializeSecret(credentials: CredentialProvider): Promise<Buffer> {
   const generated: StoredSecretPayload = {
     version: STORED_SECRET_VERSION,

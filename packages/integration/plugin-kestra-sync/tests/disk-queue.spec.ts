@@ -18,7 +18,7 @@ function newClient(failing: boolean): KestraSessionSyncClient {
   })
   return new KestraSessionSyncClient(
     { baseUrl: 'http://k.test', token: 't', mode: 'batch', queuePath: join(queueDir, 'q.jsonl') },
-    fetchImpl as unknown as typeof fetch,
+    fetchImpl,
   )
 }
 
@@ -52,6 +52,6 @@ describe('队列磁盘持久化（审查任务 1.3）', () => {
     }
     const lines = readFileSync(join(queueDir, 'q.jsonl'), 'utf8').trim().split('\n')
     expect(lines).toHaveLength(1000)
-    expect(JSON.parse(lines[0]!).sessionId).toBe('s-1') // 最旧的 s-0 被丢弃
+    expect((JSON.parse(lines[0]!) as { sessionId: string }).sessionId).toBe('s-1') // 最旧的 s-0 被丢弃
   })
 })

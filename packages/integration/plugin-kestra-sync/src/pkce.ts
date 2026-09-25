@@ -15,6 +15,9 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 
+/**
+ * PKCE 登录配置：公开客户端参数与测试注入点。
+ */
 export interface PkceConfig {
   /** IdP 基地址（Kestra OIDC Provider 对 PC 可达的地址）。 */
   issuer: string
@@ -34,6 +37,7 @@ export interface PkceConfig {
   now?: () => number
 }
 
+/** 登录得到的 token 三元组（含可选 refresh token 与用户 sub）。 */
 export interface PkceTokens {
   accessToken: string
   refreshToken?: string
@@ -41,22 +45,39 @@ export interface PkceTokens {
   sub: string
 }
 
-/** 默认缓存路径（每个 OS 用户一份）。 */
+/**
+ * 默认缓存路径（每个 OS 用户一份）。
+ * @returns `~/.dsh/oidc-pkce-token.json`。
+ */
 export function defaultCachePath(): string {
   return join(homedir(), '.dsh', 'oidc-pkce-token.json')
 }
 
-/** PKCE code_verifier → S256 challenge（RFC 7636 §4.2）。 */
+/**
+ * PKCE code_verifier → S256 challenge（RFC 7636 §4.2）。
+ * @param verifier - code_verifier。
+ * @returns base64url 编码的 challenge。
+ */
 export function codeChallenge(verifier: string): string {
   return createHash('sha256').update(verifier).digest('base64url')
 }
 
-/** 生成 43-128 字符的 code_verifier。 */
+/**
+ * 生成 43-128 字符的 code_verifier。
+ * @returns 随机 code_verifier。
+ */
 export function createVerifier(): string {
   return randomBytes(32).toString('base64url')
 }
 
-/** 纯函数：构造授权端点 URL（无 secret —— 公开客户端）。 */
+/**
+ * 纯函数：构造授权端点 URL（无 secret —— 公开客户端）。
+ * @param config - PKCE 配置（issuer/clientId/scopes）。
+ * @param verifier - code_verifier。
+ * @param state - CSRF 状态串。
+ * @param port - loopback 回跳端口。
+ * @returns 授权端点 URL。
+ */
 export function buildAuthorizeUrl(config: PkceConfig, verifier: string, state: string, port: number): string {
   const url = new URL('/oidc/authorize', config.issuer)
   url.searchParams.set('response_type', 'code')
@@ -69,7 +90,12 @@ export function buildAuthorizeUrl(config: PkceConfig, verifier: string, state: s
   return url.toString()
 }
 
-/** 纯函数：构造 token 请求（公开客户端：client_id 进 body，无 Basic 认证）。 */
+/**
+ * 纯函数：构造 token 请求（公开客户端：client_id 进 body，无 Basic 认证）。
+ * @param config - PKCE 配置（issuer/clientId）。
+ * @param fields - 表单字段（grant_type、code、code_verifier 等）。
+ * @returns 待发起的 token 请求（url + init）。
+ */
 export function buildTokenRequest(config: PkceConfig, fields: Record<string, string>): { url: string; init: RequestInit } {
   return {
     url: new URL('/oidc/token', config.issuer).toString(),
@@ -82,11 +108,15 @@ export function buildTokenRequest(config: PkceConfig, fields: Record<string, str
   }
 }
 
-/** 纯函数：解析 id_token 的 sub（不验签 —— 展示与归属展示用；归属鉴权在 Kestra 端）。 */
+/**
+ * 纯函数：解析 id_token 的 sub（不验签 —— 展示与归属展示用；归属鉴权在 Kestra 端）。
+ * @param idToken - JWT id_token。
+ * @returns 解析出的 sub；无法解析时返回空字符串。
+ */
 export function subFromIdToken(idToken: string | undefined): string {
   try {
-    const payload = String(idToken ?? '').split('.')[1] ?? ''
-    const json = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    const payload = (idToken ?? '').split('.')[1] ?? ''
+    const json: { sub?: unknown } = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: unknown }
     return typeof json.sub === 'string' ? json.sub : ''
   } catch {
     return ''
@@ -127,7 +157,7 @@ function waitForCallback(port: number, expectedState: string, timeoutMs = 120_00
     const server = createServer(onRequest)
     server.on('error', (e) => {
       clearTimeout(timer)
-      reject(new Error(`loopback listener on 127.0.0.1:${port} failed: ${(e as Error).message}`))
+      reject(new Error(`loopback listener on 127.0.0.1:${port} failed: ${e.message}`))
     })
     server.listen(port, '127.0.0.1')
   })
@@ -160,16 +190,24 @@ export class PkceTokenProvider {
     this.now = config.now ?? Date.now
   }
 
-  /** 当前用户（缓存中的 sub），供 UI/日志展示。 */
+  /**
+   * 当前用户（缓存中的 sub），供 UI/日志展示。
+   * @returns 缓存中的 OIDC sub；未登录时返回空字符串。
+   */
   currentSub(): string {
     return readCache(this.cachePath)?.sub ?? ''
   }
 
+  /** 登出：删除本地 token 缓存。 */
   logout(): void {
     rmSync(this.cachePath, { force: true })
   }
 
-  /** 取一个有效 access token：缓存未过期直接用；临期/失效先 refresh；都失败则重新登录。 */
+  /**
+   * 取一个有效 access token：缓存未过期直接用；临期/失效先 refresh；都失败则重新登录。
+   * @param forceRefresh - 强制刷新（跳过缓存命中）。
+   * @returns 可用的 access token。
+   */
   async getToken(forceRefresh = false): Promise<string> {
     this.inflight ??= (async () => {
       const cached = readCache(this.cachePath)
@@ -192,7 +230,10 @@ export class PkceTokenProvider {
     }
   }
 
-  /** 完整授权码 + PKCE 登录：起 loopback、开浏览器、换票、写缓存。 */
+  /**
+   * 完整授权码 + PKCE 登录：起 loopback、开浏览器、换票、写缓存。
+   * @returns 新获取的 token 三元组。
+   */
   async login(): Promise<PkceTokens> {
     const port = this.config.redirectPort
     const verifier = createVerifier()

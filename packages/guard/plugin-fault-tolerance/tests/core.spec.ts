@@ -28,7 +28,12 @@ describe('backoff sequence', () => {
 describe('FaultTolerance', () => {
   it('retries with backoff and succeeds', async () => {
     const sleep = vi.fn().mockResolvedValue(undefined)
-    const ft = new FaultTolerance({ maxAttempts: 3, baseDelayMs: 1, multiplier: 2, jitter: false }, [], { failureThreshold: 10, windowSeconds: 60, openSeconds: 1 }, sleep)
+    const ft = new FaultTolerance(
+      { maxAttempts: 3, baseDelayMs: 1, multiplier: 2, jitter: false },
+      [],
+      { failureThreshold: 10, windowSeconds: 60, openSeconds: 1 },
+      sleep,
+    )
     let calls = 0
     const result = await ft.execute('crm_query', async () => {
       calls += 1

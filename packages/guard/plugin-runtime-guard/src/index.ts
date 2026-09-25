@@ -11,6 +11,9 @@ import { RuntimeGuard, type RuntimeGuardConfig } from './core.ts'
 export const name = 'runtime-guard'
 export const inject: string[] = []
 
+/**
+ * 插件配置：运行防护覆盖层（继承 {@link RuntimeGuardConfig} 全部字段）。
+ */
 export interface Config extends RuntimeGuardConfig {
   /** 事件上报的目标会话同步插件（经 Kestra 观察中心） */
   reportToKestra?: boolean

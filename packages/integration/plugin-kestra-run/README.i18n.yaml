@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/integration/plugin-kestra-run/README.md
+/:
+  en: e7282d41736812c2
+  zh: 87029e91303cbc56
+/deepseek-ai-dsh-plugin-kestra-run:
+  en: 0a407f41da4f5e3d
+  zh: 9cbddd549247d31e
+/deepseek-ai-dsh-plugin-kestra-run/summary:
+  en: 014d21e19097d685
+  zh: 7095026cc6cd3bc0
+/deepseek-ai-dsh-plugin-kestra-run/table-of-contents:
+  en: f95c7c427b2ec4d9
+  zh: 24f6d4c82be123a9
+/deepseek-ai-dsh-plugin-kestra-run/use-this-package:
+  en: 47e544671abc644f
+  zh: ebd97e44e1844b87
+/deepseek-ai-dsh-plugin-kestra-run/use-this-package/when-to-choose-it:
+  en: cf27da469cd57ddc
+  zh: d33ebe4539ab7b80
+/deepseek-ai-dsh-plugin-kestra-run/use-this-package/minimal-configuration:
+  en: 70131221b7fa90ba
+  zh: 01bb2746b8e58955
+/deepseek-ai-dsh-plugin-kestra-run/configuration:
+  en: 2be0704f605beeeb
+  zh: a564064bc2500805
+/deepseek-ai-dsh-plugin-kestra-run/usage:
+  en: 4321f529f280401e
+  zh: 3d584dfd0beefcb8
+/deepseek-ai-dsh-plugin-kestra-run/dev-note:
+  en: 8bcb8e046521724c
+  zh: b88d85f56051e8df
+/deepseek-ai-dsh-plugin-kestra-run/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-plugin-kestra-run/model-experience/run-observation:
+  en: f87f7a45bd6205b6
+  zh: 620022f8cf6c8557
+/deepseek-ai-dsh-plugin-kestra-run/model-experience/run-observation/what-the-model-sees:
+  en: c0ccb7a1b5c0c780
+  zh: 6e12ee78862c6bd5
+/deepseek-ai-dsh-plugin-kestra-run/model-experience/run-observation/token-effect:
+  en: 7eccd720925e5347
+  zh: 43d1ba6f39de1f72
+/deepseek-ai-dsh-plugin-kestra-run/model-experience/run-observation/kv-cache-effect:
+  en: 8e7bfa3df4a6d29d
+  zh: c173d44820bedf5a
+/deepseek-ai-dsh-plugin-kestra-run/known-limitations-and-deferred-work:
+  en: 06bd514f7f60ec15
+  zh: ba66703796e4ebf9

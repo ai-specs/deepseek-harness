@@ -21,14 +21,14 @@ describe('kestra-sync auth=web-identity', () => {
   it('pulls the bearer token from the web identity handle', async () => {
     const fetchImpl = vi.fn(async (_url: unknown, _init?: RequestInit) =>
       new Response(JSON.stringify([]), { status: 200 }))
-    const { client, ensure } = handle(fetchImpl as unknown as typeof fetch)
+    const { client, ensure } = handle(fetchImpl)
     expect(client.currentSub()).toBe('alice@kestra.io')
 
     await client.push({ sessionId: 's-1', phase: 'completed', state: '{}' })
     expect(ensure).toHaveBeenCalled()
     const call = fetchImpl.mock.calls[0]
     if (call === undefined) throw new Error('fetch was not called')
-    const headers = (call[1] as RequestInit | undefined)?.headers as Record<string, string>
+    const headers = call[1]?.headers as Record<string, string>
     expect(headers.Authorization).toBe('Bearer web-at')
   })
 
@@ -61,7 +61,7 @@ describe('kestra-sync auth=web-identity', () => {
     })
     const client = new KestraSessionSyncClient(
       { baseUrl: 'http://k.test', auth: 'web-identity' },
-      fetchImpl as unknown as typeof fetch,
+      fetchImpl,
       undefined,
       {
         ensureAccessToken: async () => 'web-at',

@@ -435,7 +435,7 @@ export type Config = LocalConfig
 ## `@deepseek-ai/dsh-client-connection`
 
 - `inject`: `credentials`
-- `source`: [`packages/client/connection/src/index.ts:92`](../packages/client/connection/src/index.ts)
+- `source`: [`packages/client/connection/src/index.ts:94`](../packages/client/connection/src/index.ts)
 
 ```ts config-catalog
 /** Browser authentication, request limits, and connection recovery configuration. */
@@ -455,6 +455,28 @@ export interface ConnectionConfig {
   cookieMaxAgeDays?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
   maxRequestBodyBytes?: number
+  /**
+   * Browser bootstrap strategy. `launch-token` (default) authenticates the
+   * first browser through the console-printed `?token=` URL; `oidc` redirects
+   * unauthenticated browsers to the Kestra IdP (Authorization Code + PKCE,
+   * public client) instead — the unified-identity deployment where the console
+   * is not read by the person at the browser. Local session storage is the
+   * data plane in both modes (本地为主，远程同步为辅).
+   */
+  auth?: 'launch-token' | 'oidc'
+  /** Required when `auth` is `oidc`. */
+  oidc?: {
+    /** Browser-facing IdP base URL (authorize/login redirects). */
+    issuerBrowserUrl: string
+    /** Server-facing IdP base URL for the code exchange; defaults to the browser URL. */
+    issuerServerUrl?: string
+    /** Public PKCE client id carrying the browser sign-in (e.g. `dsh-pc`). */
+    clientId: string
+    /** Callback path; must be registered on the IdP client. Default `/oidc/callback`. */
+    callbackPath?: string
+    /** Authorize scope. Default `openid profile`. */
+    scope?: string
+  }
 }
 
 /** Timing for generation readiness and automatic reconnection. */
@@ -2219,6 +2241,177 @@ export interface PlanModeConfig {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-plan-mode -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-plugin-fault-tolerance -->
+<a id="deepseek-aidsh-plugin-fault-tolerance"></a>
+
+## `@deepseek-ai/dsh-plugin-fault-tolerance`
+
+- `source`: [`packages/guard/plugin-fault-tolerance/src/index.ts:17`](../packages/guard/plugin-fault-tolerance/src/index.ts)
+
+```ts config-catalog
+/**
+ * 插件配置：容错引擎的覆盖层，全部字段经 Nacos `dsh-fault-tolerance.yaml` 下发映射而来。
+ */
+export interface Config {
+  /** 重试配置（默认 4 次、1s 起、倍增 2）。 */
+  retry?: RetryConfig
+  /** 兜底规则库：重试耗尽后按正则命中返回安全默认答复。 */
+  fallbacks?: FallbackRule[]
+  /** 熔断器配置（默认连续 5 次失败开启、30s 后半开探测）。 */
+  circuitBreaker?: CircuitBreakerConfig
+}
+
+/**
+ * 重试配置：指数退避的预算与节奏。
+ */
+export interface RetryConfig {
+  /** 最大尝试次数（默认 4）。 */
+  maxAttempts: number
+  /** 基础延迟毫秒数（默认 1000 → 1s/2s/4s/8s）。 */
+  baseDelayMs: number
+  /** 退避倍增系数（默认 2）。 */
+  multiplier: number
+  /** 是否启用随机抖动，避免 thundering herd（默认 false）。 */
+  jitter: boolean
+}
+
+/**
+ * 兜底规则：正则匹配工具名，命中时返回安全默认答复。
+ */
+export interface FallbackRule {
+  /** 工具名匹配正则（如 `^mcp_weather`）。 */
+  matchTool: string
+  /** 命中后返回的安全默认答复。 */
+  response: string
+}
+
+/**
+ * 熔断器配置：连续失败达到阈值后开启熔断，openSeconds 后进入半开探测。
+ */
+export interface CircuitBreakerConfig {
+  /** 连续失败次数阈值（默认 5）。 */
+  failureThreshold: number
+  /** 熔断窗口时长（秒），用于统计连续失败的时间跨度。 */
+  windowSeconds: number
+  /** 熔断开启时长（秒），之后放行一次半开探测。 */
+  openSeconds: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-fault-tolerance -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-plugin-kestra-run -->
+<a id="deepseek-aidsh-plugin-kestra-run"></a>
+
+## `@deepseek-ai/dsh-plugin-kestra-run`
+
+- `source`: [`packages/integration/plugin-kestra-run/src/index.ts:29`](../packages/integration/plugin-kestra-run/src/index.ts)
+
+```ts config-catalog
+/** Plugin config resolved from the deployment environment by dsh.patch.yml. */
+export interface Config {
+  /** Where the structured result JSON is written (kestra-sync relay report target). */
+  resultFile: string
+  /** Deny-by-default tool allowlist; undefined or empty = deployment default set. */
+  allowTools?: string[]
+  /** Wall-clock bound in seconds; 0 = unbounded. On expiry the partial result is written and the process exits 124. */
+  timeoutSeconds?: number
+  /**
+   * ReAct turn budget (0 = unbounded). Once a NEW turn opens beyond the
+   * budget, tool calls are denied with a wrap-up instruction, so the model
+   * still closes the turn with its best final answer instead of being killed.
+   */
+  maxIterations?: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-kestra-run -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-plugin-kestra-sync -->
+<a id="deepseek-aidsh-plugin-kestra-sync"></a>
+
+## `@deepseek-ai/dsh-plugin-kestra-sync`
+
+- `inject`: `agents` · `sessionController` · `workspaceRegistry`
+- `source`: [`packages/integration/plugin-kestra-sync/src/index.ts:40`](../packages/integration/plugin-kestra-sync/src/index.ts)
+
+```ts config-catalog
+/**
+ * 插件配置：继承 {@link KestraSyncConfig} 全部连接/推送参数，追加 dsh 接入端行为。
+ */
+export interface Config extends KestraSyncConfig {
+  /** 批量队列磁盘持久化路径（默认 ~/.dsh/sync-queue.jsonl） */
+  queuePath?: string
+  /** 手机输入接力执行的超时秒数（默认 300）。 */
+  remoteInputTimeoutSeconds?: number
+  /** 选项 B：SSE 指令接收主链路（默认 true）。false 时 PC 不接入中台（无降级轮询——A 组件已退役）。 */
+  useSse?: boolean
+  /** 本地会话索引快照路径（默认 ~/.dsh/kestra-session-index.json；dsh 数据卷内即持久）。 */
+  sessionIndexPath?: string
+}
+
+/**
+ * 同步客户端配置：Kestra API 连接与推送模式（realtime/batch）。
+ */
+export interface KestraSyncConfig {
+  /** Kestra API base URL, e.g. http://kestra.internal:8080 */
+  baseUrl: string
+  /** 批量队列磁盘持久化路径（默认 ~/.dsh/sync-queue.jsonl），重启后待同步快照不丢 */
+  queuePath?: string
+  /**
+   * Bearer token for the dsh APIs — an access token issued by the Kestra OIDC
+   * provider. Optional when clientId/clientSecret are given: the client then
+   * fetches and refreshes one itself (client_credentials grant).
+   */
+  token?: string
+  /** OIDC client for the client_credentials grant (the seeded `dsh` client). */
+  clientId?: string
+  /** OIDC client secret for the client_credentials grant（仅服务身份模式使用，不落用户会话）。 */
+  clientSecret?: string
+  /**
+   * 取票方式（默认按提供的凭据自动判定）：client_credentials=服务身份（dsh 执行面/脚本），
+   * pkce=用户身份（Authorization Code + PKCE(S256)，会话归属该用户 OIDC sub ——
+   * dsh.docx：用户接入端一律 PKCE，客户端不持 client_secret）；
+   * web-identity=web 进程留存身份（auth='web-identity' 时必填 webIdentity 句柄，
+   * 令牌来自浏览器 OIDC 登录的留存与自动续期）。
+   */
+  auth?: 'client_credentials' | 'pkce' | 'web-identity'
+  /** PKCE 登录参数（auth='pkce' 时必填）。 */
+  pkce?: PkceConfig
+  /** 本地会话索引快照路径（默认 ~/.dsh/kestra-session-index.json）。 */
+  sessionIndexPath?: string
+  /** Tenant used for the API path (Kestra 2.x multi-tenancy) */
+  tenant?: string
+  /** realtime pushes immediately; batch coalesces snapshots per interval */
+  mode?: 'realtime' | 'batch'
+  /** Batch flush interval in milliseconds (mode=batch). Default 2000. */
+  batchIntervalMs?: number
+  /** Push timeout in milliseconds. Default 5000 (P99 target 500ms is per tool call). */
+  timeoutMs?: number
+}
+
+/**
+ * PKCE 登录配置：公开客户端参数与测试注入点。
+ */
+export interface PkceConfig {
+  /** IdP 基地址（Kestra OIDC Provider 对 PC 可达的地址）。 */
+  issuer: string
+  /** 公开客户端 id（migration 2.0.28 种子的 dsh-pc）。 */
+  clientId: string
+  /** loopback 回跳端口（redirect_uri=http://127.0.0.1:<port>/callback）。 */
+  redirectPort: number
+  /** 授权 scope。 */
+  scopes: string[]
+  /** token 缓存路径（默认 ~/.dsh/oidc-pkce-token.json）。 */
+  cachePath?: string
+  /** 测试注入：跳过真实浏览器打开。 */
+  openUrl?: (url: string) => void
+  /** 测试注入：fetch 实现。 */
+  fetchImpl?: typeof fetch
+  /** 测试注入：now。 */
+  now?: () => number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-kestra-sync -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-plugin-manager -->
 <a id="deepseek-aidsh-plugin-manager"></a>
 
@@ -2254,6 +2447,57 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-manager -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-plugin-nacos-config -->
+<a id="deepseek-aidsh-plugin-nacos-config"></a>
+
+## `@deepseek-ai/dsh-plugin-nacos-config`
+
+- `source`: [`packages/integration/plugin-nacos-config/src/index.ts:17`](../packages/integration/plugin-nacos-config/src/index.ts)
+
+```ts config-catalog
+/**
+ * 插件配置：继承 {@link NacosConfigClientOptions} 全部连接/认证参数，追加磁盘缓存目录。
+ */
+export interface Config extends NacosConfigClientOptions {
+  /** 配置磁盘缓存目录（默认 ~/.dsh/config-cache） */
+  cacheDir?: string
+}
+
+/**
+ * Nacos 配置客户端选项：连接、认证与轮询参数。
+ */
+export interface NacosConfigClientOptions {
+  /** Nacos v3 控制台地址（API 与控制台同端口），e.g. http://nacos.internal:18480 */
+  server: string
+  /**
+   * 认证模式：`oidc`（默认，Nacos auth system=oidc 时唯一可用——本地账密登录已禁用，
+   * 用 Kestra OIDC 的 client_credentials 票据）或 `local`（传统 nacos 账密登录）。
+   */
+  auth?: 'oidc' | 'local'
+  /** auth=oidc：Kestra OIDC token 端点（容器内 http://kestra:8080/oidc/token）。 */
+  oidcTokenUrl?: string
+  /** auth=oidc：client_credentials 的客户端（种子化 nacos 客户端）。 */
+  clientId?: string
+  /** auth=oidc：client_credentials 密钥。 */
+  clientSecret?: string
+  /** 配置磁盘缓存目录（默认 ~/.dsh/config-cache），Nacos 不可用时降级读取 */
+  cacheDir?: string
+  /** v3 控制台登录用户（默认 nacos）；用于获取 accessToken */
+  username?: string
+  /** v3 控制台登录密码 */
+  password?: string
+  /** Namespace id; dsh.docx uses `dsh` */
+  namespace?: string
+  /** Config group; default DEFAULT_GROUP */
+  group?: string
+  /** Poll interval in milliseconds (listener semantic). Default 10000. */
+  pollIntervalMs?: number
+  /** Data IDs to track; defaults to the six dsh-* documents */
+  dataIds?: string[]
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-nacos-config -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-plugin-package-inventory-deepseek -->
 <a id="deepseek-aidsh-plugin-package-inventory-deepseek"></a>
 
@@ -2270,6 +2514,42 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-package-inventory-deepseek -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-plugin-runtime-guard -->
+<a id="deepseek-aidsh-plugin-runtime-guard"></a>
+
+## `@deepseek-ai/dsh-plugin-runtime-guard`
+
+- `source`: [`packages/guard/plugin-runtime-guard/src/index.ts:17`](../packages/guard/plugin-runtime-guard/src/index.ts)
+
+```ts config-catalog
+/**
+ * 插件配置：运行防护覆盖层（继承 {@link RuntimeGuardConfig} 全部字段）。
+ */
+export interface Config extends RuntimeGuardConfig {
+  /** 事件上报的目标会话同步插件（经 Kestra 观察中心） */
+  reportToKestra?: boolean
+  /** 会话标识（观察中心上报用；缺省 session） */
+  sessionId?: string
+}
+
+/**
+ * Runtime guard (dsh.docx 第十二章 稳定性兜底).
+ *
+ * Prevents runaway agent loops, enforces execution depth limits, watches the
+ * token budget, and emits guard events for the Kestra observation center.
+ */
+
+export interface RuntimeGuardConfig {
+  /** 同一工具+同参指纹连续出现该次数即判死锁循环 */
+  loopRepeatThreshold: number        // 默认 3
+  /** 最大执行深度（子任务嵌套层数） */
+  maxDepth: number                   // 默认 8
+  /** 单会话 token 预算，超过即熔断告警 */
+  tokenBudget: number                // 默认 500000
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-runtime-guard -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-ptc-runtime-node -->
 <a id="deepseek-aidsh-ptc-runtime-node"></a>

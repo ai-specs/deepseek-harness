@@ -11,9 +11,15 @@ import { FaultTolerance, type FallbackRule, type RetryConfig, type CircuitBreake
 export const name = 'fault-tolerance'
 export const inject: string[] = []
 
+/**
+ * 插件配置：容错引擎的覆盖层，全部字段经 Nacos `dsh-fault-tolerance.yaml` 下发映射而来。
+ */
 export interface Config {
+  /** 重试配置（默认 4 次、1s 起、倍增 2）。 */
   retry?: RetryConfig
+  /** 兜底规则库：重试耗尽后按正则命中返回安全默认答复。 */
   fallbacks?: FallbackRule[]
+  /** 熔断器配置（默认连续 5 次失败开启、30s 后半开探测）。 */
   circuitBreaker?: CircuitBreakerConfig
 }
 

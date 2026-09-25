@@ -148,6 +148,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns browser authentication and shared HTTP request dispatch; API adapters register endpoints and streams.',
   },
   {
+    key: 'webIdentity',
+    pkg: 'client-connection',
+    title: 'Retained web-identity sign-in for the browser Host',
+    mode: 'core',
+    consumers: ['client-connection', 'plugin-kestra-sync'],
+    note: 'Persists the browser OIDC sign-in tokens and keeps them alive by refresh; the phone-input relay (kestra-sync auth=web-identity) consumes it instead of a second daemon-side login.',
+  },
+  {
     key: 'mcpResources',
     pkg: 'mcp-resources',
     title: 'Scoped MCP resource access',

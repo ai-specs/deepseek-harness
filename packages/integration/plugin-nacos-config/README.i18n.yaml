@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/integration/plugin-nacos-config/README.md
+/:
+  en: 238c1e2208f4d54f
+  zh: c8c69964ea6f1a34
+/deepseek-ai-dsh-plugin-nacos-config:
+  en: 9ff00e0a40e05f86
+  zh: baf78cf0f1fe43f8
+/deepseek-ai-dsh-plugin-nacos-config/summary:
+  en: 116ec33882604fe5
+  zh: f39ef0c0c76000ef
+/deepseek-ai-dsh-plugin-nacos-config/table-of-contents:
+  en: f95c7c427b2ec4d9
+  zh: 24f6d4c82be123a9
+/deepseek-ai-dsh-plugin-nacos-config/use-this-package:
+  en: 6b70a3aadb6364b6
+  zh: c9276dfd8ecaaef0
+/deepseek-ai-dsh-plugin-nacos-config/use-this-package/when-to-choose-it:
+  en: 825a22f1967e0c77
+  zh: 59683dba24965178
+/deepseek-ai-dsh-plugin-nacos-config/use-this-package/minimal-configuration:
+  en: 1051147ebcd85ae1
+  zh: 431e9d608bdbf5ca
+/deepseek-ai-dsh-plugin-nacos-config/configuration:
+  en: 949f92f9b420296a
+  zh: 389479d23fb83081
+/deepseek-ai-dsh-plugin-nacos-config/usage:
+  en: 02b1ba28824a103b
+  zh: 72052973f7c61dec
+/deepseek-ai-dsh-plugin-nacos-config/dev-note:
+  en: 63980fcc4181f2cd
+  zh: 555f99160a5cadf7
+/deepseek-ai-dsh-plugin-nacos-config/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-plugin-nacos-config/model-experience/configuration-delivery:
+  en: b240676eecfad439
+  zh: 7a87bb13d2a52398
+/deepseek-ai-dsh-plugin-nacos-config/model-experience/configuration-delivery/what-the-model-sees:
+  en: 6d01fa08acd5f619
+  zh: 7995b6fa12e539cd
+/deepseek-ai-dsh-plugin-nacos-config/model-experience/configuration-delivery/token-effect:
+  en: 7d3270d4eb431c0f
+  zh: d8312594e475b1e6
+/deepseek-ai-dsh-plugin-nacos-config/model-experience/configuration-delivery/kv-cache-effect:
+  en: ae107eb0e2247741
+  zh: 048698aa0c866aa2
+/deepseek-ai-dsh-plugin-nacos-config/known-limitations-and-deferred-work:
+  en: b303dee418b3d624
+  zh: 8583d2d6b58fb102

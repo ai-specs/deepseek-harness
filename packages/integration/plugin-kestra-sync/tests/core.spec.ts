@@ -20,7 +20,7 @@ describe('buildSyncRequest', () => {
     expect(url).toBe('http://kestra.internal:8080/api/v1/dsh/sessions/s-1')
     expect(init.method).toBe('PUT')
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer t0k3n')
-    const body = JSON.parse(String(init.body))
+    const body = JSON.parse(init.body as string) as { phase?: string; at?: unknown }
     expect(body.phase).toBe('running')
     expect(body.at).toBeTruthy()
   })
@@ -35,7 +35,7 @@ describe('OIDC client_credentials (dsh API Bearer)', () => {
     })
     expect(url).toBe('http://kestra.internal:8080/oidc/token')
     expect(init.method).toBe('POST')
-    expect(String(init.body)).toBe('grant_type=client_credentials')
+    expect(init.body as string).toBe('grant_type=client_credentials')
     const auth = (init.headers as Record<string, string>).Authorization
     expect(auth).toBe(`Basic ${Buffer.from('dsh:s3cret').toString('base64')}`)
   })
@@ -53,7 +53,7 @@ describe('OIDC client_credentials (dsh API Bearer)', () => {
     })
     const client = new KestraSessionSyncClient(
       { baseUrl: 'http://kestra:8080', clientId: 'dsh', clientSecret: 's3cret' },
-      fetchImpl as unknown as typeof fetch,
+      fetchImpl,
     )
     const r1 = await client.push({ sessionId: 'cc-1', phase: 'running' })
     expect(r1?.status).toBe(401)
@@ -75,7 +75,7 @@ describe('Kestra degradation (审查 9.1)', () => {
     })
     const client = new KestraSessionSyncClient(
       { ...config, mode: 'batch' },
-      fetchImpl as unknown as typeof fetch,
+      fetchImpl,
     )
     await client.push({ ...snapshot, sessionId: 'deg-1' })
     await client.push({ ...snapshot, sessionId: 'deg-2' })
@@ -91,7 +91,7 @@ describe('Kestra degradation (审查 9.1)', () => {
 describe('KestraSessionSyncClient', () => {
   it('pushes realtime snapshots and reports ok', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
-    const client = new KestraSessionSyncClient(config, fetchImpl as unknown as typeof fetch)
+    const client = new KestraSessionSyncClient(config, fetchImpl)
     const result = await client.push(snapshot)
     expect(result?.ok).toBe(true)
     expect(fetchImpl).toHaveBeenCalledOnce()
@@ -102,7 +102,7 @@ describe('KestraSessionSyncClient', () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
     const client = new KestraSessionSyncClient(
       { ...config, mode: 'batch' },
-      fetchImpl as unknown as typeof fetch,
+      fetchImpl,
     )
     const queued = await client.push(snapshot)
     expect(queued).toBeUndefined()
@@ -113,7 +113,7 @@ describe('KestraSessionSyncClient', () => {
 
   it('never throws on transport failure (outbound-only side)', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('down'))
-    const client = new KestraSessionSyncClient(config, fetchImpl as unknown as typeof fetch)
+    const client = new KestraSessionSyncClient(config, fetchImpl)
     const result = await client.push(snapshot)
     expect(result?.ok).toBe(false)
     expect(fetchImpl).toHaveBeenCalledTimes(2)

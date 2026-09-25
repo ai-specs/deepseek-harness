@@ -30,7 +30,7 @@ function clientWith(content: string | undefined, fetchImpl?: typeof fetch): Naco
   })
   return new NacosConfigClient(
     { server: 'http://nacos.test', pollIntervalMs: 100000, username: 'nacos', password: 'test' },
-    impl as unknown as typeof fetch,
+    impl,
   )
 }
 
@@ -64,13 +64,13 @@ describe('Nacos degradation (审查 9.2)', () => {
     })
     const client = new NacosConfigClient(
       { server: 'http://nacos.test', pollIntervalMs: 50, username: 'nacos', password: 'p' },
-      fetchImpl as unknown as typeof fetch,
+      fetchImpl,
     )
     await client.fetchConfig('dsh-context.yaml')
-    expect(client.getCached<any>('dsh-context.yaml')?.window?.maxMessages).toBe(40)
+    expect(client.getCached<{ window?: { maxMessages?: number } }>('dsh-context.yaml')?.window?.maxMessages).toBe(40)
     failing = true
     await client.refreshAll()          // 不抛出
-    expect(client.getCached<any>('dsh-context.yaml')?.window?.maxMessages).toBe(40) // 缓存保留
+    expect(client.getCached<{ window?: { maxMessages?: number } }>('dsh-context.yaml')?.window?.maxMessages).toBe(40) // 缓存保留
   })
 })
 
@@ -100,7 +100,7 @@ describe('NacosConfigClient', () => {
     })
     const client = new NacosConfigClient(
       { server: 'http://nacos.test', username: 'nacos', password: 'p' },
-      fetchSpy as unknown as typeof fetch,
+      fetchSpy,
     )
     const results = await client.syncSkillPackages('/tmp/dsh-test-skills', 50)
     const byName = new Map(results.map(r => [r.name, r]))

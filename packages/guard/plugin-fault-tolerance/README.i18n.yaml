@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/guard/plugin-fault-tolerance/README.md
+/:
+  en: ddc91da024821ab4
+  zh: 296faba6beca9f74
+/deepseek-ai-dsh-plugin-fault-tolerance:
+  en: 876ef9b0167b3655
+  zh: 56834c59e162b071
+/deepseek-ai-dsh-plugin-fault-tolerance/summary:
+  en: 556a0deb383fb0a3
+  zh: ddb7e1c25afe1991
+/deepseek-ai-dsh-plugin-fault-tolerance/table-of-contents:
+  en: f95c7c427b2ec4d9
+  zh: 24f6d4c82be123a9
+/deepseek-ai-dsh-plugin-fault-tolerance/use-this-package:
+  en: 526fa0f3fe9c703a
+  zh: a944d9e3bef3e571
+/deepseek-ai-dsh-plugin-fault-tolerance/use-this-package/when-to-choose-it:
+  en: f924b141c58ad632
+  zh: 7e6022ac785575dc
+/deepseek-ai-dsh-plugin-fault-tolerance/use-this-package/minimal-configuration:
+  en: 914175dafcc3b08b
+  zh: 13389427fad5d91b
+/deepseek-ai-dsh-plugin-fault-tolerance/configuration:
+  en: 8f20c09b94e8be8f
+  zh: 57900de8409e719a
+/deepseek-ai-dsh-plugin-fault-tolerance/usage:
+  en: 0b3cd6b35716ffcd
+  zh: 45bc734598bd2b52
+/deepseek-ai-dsh-plugin-fault-tolerance/dev-note:
+  en: ee01177f69e643bf
+  zh: d22b35f011530309
+/deepseek-ai-dsh-plugin-fault-tolerance/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-plugin-fault-tolerance/model-experience/tool-failure-handling:
+  en: c28592a2410765bc
+  zh: dd42fe017ce089c1
+/deepseek-ai-dsh-plugin-fault-tolerance/model-experience/tool-failure-handling/what-the-model-sees:
+  en: 4d9212ad7e291251
+  zh: 1061158beae2fc4f
+/deepseek-ai-dsh-plugin-fault-tolerance/model-experience/tool-failure-handling/token-effect:
+  en: c542fd6a4ceccef8
+  zh: 5b46e225c9caf781
+/deepseek-ai-dsh-plugin-fault-tolerance/model-experience/tool-failure-handling/kv-cache-effect:
+  en: 9a02a3cec2062125
+  zh: 7e03e2507017f7a3
+/deepseek-ai-dsh-plugin-fault-tolerance/known-limitations-and-deferred-work:
+  en: 6cb75e5017ae5161
+  zh: 525398a9553a170f
