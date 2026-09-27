@@ -475,6 +475,7 @@ describe('Messages images', () => {
     await expect(prepareImages([assistant([image])], connection, model, attachments, access, signal)).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTENT' })
     expect(() => body([result('a', [image])])).toThrow(/image/)
     expect(() => body([assistant([image])])).toThrow(/assistant/)
+    // @ts-expect-error -- malformed provider input can carry a retired nested result block.
     expect(() => body([result('a', [{ type: 'tool-result', toolCallId: ToolCallId('nested'), content: [] }])]))
       .toThrow(/user\/tool-result content tool-result/)
     expect(() => serialize(options({ model }), connection, [result('a', [image])], new Map([[ref.attachmentId, version]]), access, undefined, new Map()))

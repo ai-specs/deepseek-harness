@@ -41,10 +41,12 @@
 #     --profile headless "用一句话回答：1+1等于几？"
 #
 # 说明：
-# - dsh 的 llm-deepseek 插件默认 protocol 为 "messages"（Anthropic 风格），
-#   多数 OpenAI 兼容端点（DashScope compatible-mode 等）只有 chat/completions；
-#   入口脚本按环境变量生成 $DSH_HOME/settings.yaml，固定 protocol: chat-completions，
-#   并把 DEEPSEEK_BASE_URL / DEEPSEEK_MODEL_NAME 注入 llm-deepseek 配置。
+# - 模型接入走上游 llm-pi-ai（openai-completions 原生协议）：入口脚本按环境变量
+#   生成 patch overlay（$DSH_HOME/patch-llm.yml）并经 `dsh --patch` 注入，注册
+#   dashscope provider（真实接入商身份，修复 UI"设置→模型"显示错位），并把
+#   DEEPSEEK_BASE_URL / DEEPSEEK_MODEL_NAME 注入 llm-pi-ai providers.dashscope。
+#   headless 无 settings 服务（settings.yaml 不加载），注入必须走 patch 层。
+#   llm-deepseek 已恢复上游（messages 单协议），不再做 protocol 定制（2026-09-27 去定制）。
 # - 镜像内不烧死端点：BASE_URL / MODEL 全部由运行时环境变量驱动，
 #   与项目 .env 的 DEEPSEEK_* 三变量直接对齐。
 # - node-pty 原生模块在 glibc 镜像（node:22-slim）有 prebuild，alpine/musl 没有。

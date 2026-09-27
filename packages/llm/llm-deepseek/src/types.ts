@@ -49,8 +49,6 @@ export interface DeepSeekCatalogModel {
  * makes a configuration change reach the next request without re-registration.
  */
 export interface DeepSeekConnectionOptions {
-  /** Wire protocol: DashScope-compatible chat-completions (fork default) or the official Messages protocol. */
-  protocol: 'chat-completions' | 'messages'
   /** Messages API root; custom paths remain unchanged. */
   baseURL: string
   /** Request defaults applied to every call (thinking mode, effort). */

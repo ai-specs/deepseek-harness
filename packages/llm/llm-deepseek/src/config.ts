@@ -16,13 +16,6 @@ const MODEL_MODALITIES = ['text', 'image'] as const satisfies readonly ModelModa
 
 /** Shared Messages request configuration, without provider credential selection. */
 export interface Config {
-  /**
-   * dsh fork: DashScope compatible-mode wire protocol selector. Defaults to
-   * `messages` (upstream); deployments speaking DashScope compatible-mode set
-   * `protocol: chat-completions` explicitly. The schema below rejects runtime
-   * reconfiguration (see the schema's assert).
-   */
-  protocol: 'chat-completions' | 'messages'
   /** Endpoint base; falls back to $DEEPSEEK_BASE_URL from a trusted environment layer, then the public API. */
   baseURL: Volatile<string | undefined>
   /** Deployment thinking policy; `disabled` limits every conversation request to `off`. */
@@ -62,7 +55,7 @@ export interface Config {
 }
 
 /** Plain options accepted by the provider resolver. */
-export type Options = { [K in keyof Config]?: Config[K] extends Volatile<infer T> ? Exclude<T, undefined> : Config[K] }
+export type Options = { [K in keyof Config]?: Config[K] extends Volatile<infer T> ? Exclude<T, undefined> : never }
 
 /** Read the current value behind every reference of a validated Config.
  * @param config Parsed plugin Config.
@@ -87,9 +80,6 @@ const catalogModel: z<DeepSeekCatalogModel> = z.object({
 
 /** Shared schema fields for Messages protocol options. */
 export const deepSeekConfigFields = {
-  // dsh fork: DashScope compatible-mode speaks chat-completions; the schema
-  // default stays messages to match upstream, deployments opt in explicitly.
-  protocol: z.union(['chat-completions', 'messages']).default('messages'),
   baseURL: z.string().volatile(),
   thinking: z.union(['enabled', 'disabled']).volatile(),
   reasoningEffort: z.union(['off', 'low', 'high', 'max']).volatile(),
@@ -113,16 +103,10 @@ export const deepSeekConfigFields = {
 export const Config = z.object(deepSeekConfigFields)
 
 /** Public API default; the internal endpoint comes from $DEEPSEEK_BASE_URL. */
-export const PUBLIC_BASE_URL = 'https://api.deepseek.com'
-
-/** Official Messages protocol root. */
-export const MESSAGES_BASE_URL = 'https://api.deepseek.com/anthropic'
+export const PUBLIC_BASE_URL = 'https://api.deepseek.com/anthropic'
 
 /** Environment variable naming this provider's endpoint, honored only from trusted layers. */
 const BASE_URL_ENV = 'DEEPSEEK_BASE_URL'
-/** Messages-protocol endpoint env (DashScope Anthropic-compatible root); separate from the
- * chat-completions endpoint so each protocol hits its own compatible-mode base. */
-const MESSAGES_BASE_URL_ENV = 'DEEPSEEK_MESSAGES_BASE_URL'
 
 /** Complete protocol settings captured for one request operation. */
 export type ResolvedDeepSeekOptions = DeepSeekConnectionOptions
@@ -218,6 +202,10 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
  * @returns validated protocol settings.
  */
 export function resolveAdapterOptions(config: Options, environment?: LaunchEnvironmentSnapshot): ResolvedDeepSeekOptions {
+  // Settings updates can reach this resolver without schema validation.
+  if (Object.hasOwn(config, 'protocol')) {
+    throw new Error('llm-deepseek: protocol is not configurable; remove it and use a Messages-compatible baseURL')
+  }
   if (config.thinking === 'disabled'
     && config.reasoningEffort !== undefined
     && config.reasoningEffort !== 'off') {
@@ -299,22 +287,12 @@ export function resolveAdapterOptions(config: Options, environment?: LaunchEnvir
     || fileQuotaCleanupBatch > 1_000) {
     throw new Error('llm-deepseek: fileQuotaCleanupBatch must be an integer from 1 through 1000')
   }
-  const baseURL = config.baseURL
-    ?? environment?.get(config.protocol === 'messages' ? MESSAGES_BASE_URL_ENV : BASE_URL_ENV)?.value
-    // dsh fork: the Python SDK and upstream callers inject only DEEPSEEK_BASE_URL;
-    // fall back to it for messages so a single-endpoint caller still reaches its
-    // mock/provider root. An explicit DEEPSEEK_MESSAGES_BASE_URL still wins.
-    ?? environment?.get(BASE_URL_ENV)?.value
-    ?? (config.protocol === 'messages' ? MESSAGES_BASE_URL : PUBLIC_BASE_URL)
+  const baseURL = config.baseURL ?? environment?.get(BASE_URL_ENV)?.value ?? PUBLIC_BASE_URL
   const parsed = new URL(baseURL)
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error('llm-deepseek: Messages baseURL must be an HTTP(S) root without credentials, query, or fragment')
   }
   return {
-    // dsh fork: the credential reference is attached by the api-key provider
-    // package (upstream split), which also owns apiKeyEnv resolution; the
-    // shared protocol layer stays credential-free.
-    protocol: config.protocol ?? 'messages',
     baseURL,
     defaults: {
       thinking: config.thinking,

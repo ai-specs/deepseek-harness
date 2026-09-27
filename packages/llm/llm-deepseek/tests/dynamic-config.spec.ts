@@ -128,7 +128,7 @@ async function boot(dir: string, config: object): Promise<Harness> {
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(StaticAttachmentStore)
   await ctx.plugin(LocalCredentialProvider, { path: join(dir, '.credentials.yaml'), watch: false })
-  configurations.set(ctx, await liveConfig(ctx, LlmDeepSeek, { protocol: 'messages', ...config }))
+  configurations.set(ctx, await liveConfig(ctx, LlmDeepSeek, config))
   return { ctx }
 }
 
@@ -309,9 +309,9 @@ describe('request-level dynamic configuration', () => {
     expect(rejected.headers[0]?.['x-api-key']).toBe('good-key')
   })
 
-  it.each(['messages', 'chat-completions'])('accepts a stored protocol=%s when the adapter mounts', async (protocol) => {
+  it.each(['messages', 'chat-completions'])('refuses a stored protocol=%s when the adapter mounts', async (protocol) => {
     const dir = await home()
-    await expect(boot(dir, { baseURL: 'http://127.0.0.1:1', protocol })).resolves.toBeDefined()
+    await expect(boot(dir, { baseURL: 'http://127.0.0.1:1', protocol })).rejects.toThrow(/protocol/)
   })
 
 })

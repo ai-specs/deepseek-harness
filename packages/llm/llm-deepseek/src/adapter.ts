@@ -7,7 +7,6 @@ import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { modelInfo } from './model-info.ts'
 import type { DeepSeekAdapterOptions, DeepSeekConnectionOptions as Connection } from './types.ts'
 import { DeepSeekFileStore } from './file-store.ts'
-import { ChatCompletionsAdapter } from './protocols/chat-completions/adapter.ts'
 import { MESSAGES_FILES_BETA, MESSAGES_TOOL_CHANGES_BETA, messagesApiRoot } from './messages-api.ts'
 import { FileResolutionFailure, RequestFiles } from './request-files.ts'
 import { prepareRequestExtensions } from './request-extensions.ts'
@@ -20,7 +19,6 @@ import { providerError, providerErrorDetail } from './transport.ts'
 /** DeepSeek provider using Messages content and native thinking replay. */
 export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapter {
   private readonly files: DeepSeekFileStore
-  private readonly chatCompletions: ChatCompletionsAdapter
   private readonly imageAccess: ImageAttachmentAccessResolver = (ref) => {
     const attachments = this.dependencies.resolveAttachments?.()
     return attachments === undefined ? undefined : this.dependencies.resolveImageAccess?.(attachments, ref)
@@ -29,10 +27,6 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
   constructor(private readonly dependencies: DeepSeekAdapterOptions<C>) {
     super()
     this.files = dependencies.resolveFiles?.() ?? new DeepSeekFileStore()
-    this.chatCompletions = new ChatCompletionsAdapter({
-      ...dependencies,
-      resolveFiles: () => this.files,
-    } as never)
   }
 
   override providerInfo(provider: string) { return { id: provider, name: this.dependencies.providerName ?? 'DeepSeek' } }
@@ -51,17 +45,10 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
     return Promise.resolve({ model: modelInfo(connection, provider, model), stream: options => this.generate(options, connection) })
   }
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    const connection = this.dependencies.options()
-    return connection.protocol === 'chat-completions'
-      ? this.chatCompletions.stream(options)
-      : this.generate(options, connection)
+    return this.generate(options, this.dependencies.options())
   }
 
   private async * generate(options: GenerateOptions, connection: C): AsyncGenerator<StreamChunk> {
-    if (connection.protocol === 'chat-completions') {
-      yield* this.chatCompletions.stream(options)
-      return
-    }
     const consumer = new AbortController()
     const signal = options.signal === undefined ? consumer.signal : AbortSignal.any([consumer.signal, options.signal])
     using watchdog = idleWatchdog(signal, connection.streamIdleTimeoutMs, 'MESSAGES_IDLE')

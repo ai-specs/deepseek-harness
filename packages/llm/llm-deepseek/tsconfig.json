@@ -30,9 +30,6 @@
       "path": "../../util/atomic-write"
     },
     {
-      "path": "../../credentials/credentials"
-    },
-    {
       "path": "../../util/brand"
     },
     {
@@ -58,9 +55,6 @@
     },
     {
       "path": "../../settings/settings"
-    },
-    {
-      "path": "../../credentials/deepseek-account"
     }
   ]
 }
