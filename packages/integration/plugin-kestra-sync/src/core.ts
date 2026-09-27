@@ -41,6 +41,12 @@ export interface WebIdentityHandle {
 export interface KestraSyncConfig {
   /** Kestra API base URL, e.g. http://kestra.internal:8080 */
   baseUrl: string
+  /**
+   * dsh relay base URL (PC ⇄ Phone 联动转发独立服务, 2026-09-27). Optional — 缺省回退 baseUrl。
+   * relay 已从 Kestra 主服务拆到独立端口（compose ${KESTRA_RELAY_PORT:-18090}，仅承载
+   * /api/v1/dsh/relay/**）：events/query-result 走本地址，其余 dsh API 仍走 baseUrl。
+   */
+  relayUrl?: string
   /** 批量队列磁盘持久化路径（默认 ~/.dsh/sync-queue.jsonl），重启后待同步快照不丢 */
   queuePath?: string
   /**
@@ -314,7 +320,7 @@ export class KestraSessionSyncClient {
   ): () => void {
     if (this.inputSseReading) return () => { this.stopInputSse() }
     this.inputSseReading = true
-    const base = this.config.baseUrl.replace(/\/+$/, '')
+    const base = this.relayBase()
     const sleep = (ms: number): Promise<void> => new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.inputSseWake = undefined
@@ -492,7 +498,7 @@ export class KestraSessionSyncClient {
     const body = { requestId, type, payload, ...(error === undefined ? {} : { error }) }
     try {
       await this.fetchImpl(
-        `${this.config.baseUrl.replace(/\/+$/, '')}/api/v1/dsh/relay/query-result`,
+        `${this.relayBase()}/api/v1/dsh/relay/query-result`,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -503,6 +509,12 @@ export class KestraSessionSyncClient {
     } catch {
       // 回填失败静默：Phone 侧下轮查询/本地缓存兜底。
     }
+  }
+
+  /** relay 基址：relayUrl（独立端口，schema 空串表示未配置）优先，缺省回退 baseUrl。 */
+  private relayBase(): string {
+    const relayUrl = this.config.relayUrl?.trim()
+    return ((relayUrl !== undefined && relayUrl.length > 0) ? relayUrl : this.config.baseUrl).replace(/\/+$/, '')
   }
 
   /**

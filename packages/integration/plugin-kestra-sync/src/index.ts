@@ -50,6 +50,7 @@ export interface Config extends KestraSyncConfig {
 
 export const Config: z<Config> = z.object({
   baseUrl: z.string().required(),
+  relayUrl: z.string().default(''),
   // 三选一：静态 access token / clientId+clientSecret（client_credentials 服务身份）/
   // pkce 块（Authorization Code + PKCE 用户身份，会话归属该用户 OIDC sub）
   token: z.string(),
