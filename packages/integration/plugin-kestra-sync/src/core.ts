@@ -342,12 +342,9 @@ export class KestraSessionSyncClient {
     void (async () => {
       let backoffMs = 1_000
       let notified = false
-      let stopHeartbeat: (() => void) | undefined
       while (this.inputSseReading) {
         let controller = new AbortController()
         this.inputSseAbort = controller
-        stopHeartbeat?.()
-        stopHeartbeat = undefined
         try {
           const token = await this.bearerToken()
           let response = await this.fetchImpl(
@@ -373,14 +370,9 @@ export class KestraSessionSyncClient {
               notified = true
             }
           }
-          // 方案 A'（2026-09-27）：连接成功即启动应用层心跳，随连接存续；
-          // 断开时停（catch 分支），relay 侧 90s 无心跳判 PC 半开离线。
-          stopHeartbeat = this.startRelayHeartbeat()
           backoffMs = 1_000 // 连接成功重置退避
           await this.readInputSse(response.body, handler, options?.approvalHandler, options?.queryHandler)
         } catch (error) {
-          stopHeartbeat?.()
-          stopHeartbeat = undefined
           // oxlint-disable-next-line typescript/no-unnecessary-condition -- stopInputSse flips this during the async wait
           if (!this.inputSseReading) break
           process.stderr.write(`[kestra-sync] relay SSE disconnected: ${String(error instanceof Error ? error.message : error)} — reconnect in ${backoffMs}ms\n`)
@@ -413,15 +405,16 @@ export class KestraSessionSyncClient {
     const reader = body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
-    // 空闲超时：SSE 长连接 TCP 半开（Kestra 端关连接但本端 fetch 流假活）时，
-    // 流既不结束也不报错，read() 永远挂起 → 重连循环出不来。heartbeat 15s，
-    // 45s（3 个心跳周期）无任何数据即主动 abort 触发重连。
+    // 空闲超时兜底：relay 侧不发出站 SSE ping（保持 TCP keepalive 真空闲），健康
+    // 连接长时间无业务数据是正常态。120s 无数据才 abort 重连——仅兜底 relay VM
+    // 半开（无 RST）的极端场景；正常情况下 relay TCP keepalive ~45s RST 本端
+    // fetch 即报错进入重连循环。
     let lastDataAt = Date.now()
     const idleGuard = setInterval(() => {
-      if (Date.now() - lastDataAt > 45_000) {
-        this.inputSseAbort?.abort(new Error('relay SSE idle timeout: no data for 45s'))
+      if (Date.now() - lastDataAt > 120_000) {
+        this.inputSseAbort?.abort(new Error('relay SSE idle timeout: no data for 120s'))
       }
-    }, 15_000)
+    }, 30_000)
     try {
       for (;;) {
         const { done, value } = await reader.read()
@@ -442,8 +435,7 @@ export class KestraSessionSyncClient {
             const data = event.data
             if (data === undefined) continue
             if (type === 'session.input') {
-              // 指令执行可能持续数分钟，不能阻塞 SSE 读取循环；否则 heartbeat
-              // 无法被消费，45s idle guard 会把仍健康的 PC 误判为离线。handler
+              // 指令执行可能持续数分钟，不能阻塞 SSE 读取循环；handler
               // 自身通过 mountClient 的 chain 保证串行执行，这里只负责持续收流。
               void Promise.resolve(handler({
                 sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
@@ -479,7 +471,7 @@ export class KestraSessionSyncClient {
                   : {}),
               })
             }
-            // heartbeat / pc.status / session.result / session.approval：PC 订阅端不消费
+            // pc.status / session.result / session.approval：PC 订阅端不消费
           } catch {
             // 非 JSON 帧（注释/空帧）忽略
           }
@@ -516,51 +508,6 @@ export class KestraSessionSyncClient {
       )
     } catch {
       // 回填失败静默：Phone 侧下轮查询/本地缓存兜底。
-    }
-  }
-
-  /**
-   * 方案 A' 应用层活性心跳（2026-09-27）：PC 每 30s POST relay /heartbeat。
-   * relay 以 90s 无心跳判 PC 半开离线（断电/死机后心跳停更）——TCP keepalive 对
-   * SSE 心跳连接不生效（出站心跳刷新内核 idle 计数，行为级测试
-   * app-scripts/src/verify/relay-keepalive-test.sh 实证），判死必须由本心跳承担。
-   * 返回停止函数；随 SSE 连接存续（连接断 → 心跳停 → relay 90s 内判 offline）。
-   */
-  private startRelayHeartbeat(): () => void {
-    const base = this.relayBase()
-    let stopped = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let inflight = false
-    const beat = async (): Promise<void> => {
-      if (stopped || inflight) return
-      inflight = true
-      try {
-        const token = await this.bearerToken()
-        await this.fetchImpl(
-          `${base}/api/v1/dsh/relay/heartbeat`,
-          {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: '{}',
-            signal: AbortSignal.timeout(5_000),
-          },
-        )
-      } catch {
-        // 静默：单次失败不重试风暴；relay 侧 90s 超时兜底判离线。
-      } finally {
-        inflight = false
-      }
-    }
-    const loop = (): void => {
-      if (stopped) return
-      timer = setTimeout(() => {
-        void beat().finally(loop)
-      }, 30_000)
-    }
-    void beat().finally(loop)
-    return () => {
-      stopped = true
-      if (timer !== undefined) clearTimeout(timer)
     }
   }
 
