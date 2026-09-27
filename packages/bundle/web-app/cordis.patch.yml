@@ -234,6 +234,10 @@
       name: '@deepseek-ai/dsh-plugin-kestra-sync'
       config:
         baseUrl: !!js process.env.DSH_KESTRA_URL || ''
+        # relay 独立服务（2026-09-27）：PC 端 relay 端点（SSE events / query-result）走
+        # DSH_RELAY_URL（compose 注入 http://dsh-relay:8090），其余 dsh API 仍走 baseUrl。
+        # 缺省空串回退 baseUrl（relayBase 判空）——非 OIDC 部署惰性不接入中台。
+        relayUrl: !!js process.env.DSH_RELAY_URL || ''
         # 非 OIDC 部署给惰性合法值（client_credentials+空 token，不接入中台）。
         # 注意：内联 !!js 的三元会被 include 求值器包成对象，条件必须用块标量。
         auth: !!js >-
