@@ -150,6 +150,18 @@ export function cookieValue(headerValue: string, name: string): string | undefin
 
 /**
  * Serialize the fixed browser-session attributes; generated names and values are cookie-safe base64url.
+ *
+ * ⚠️ AI / maintainer guard — do NOT "fix" SameSite back to `Strict` when merging upstream or
+ * refactoring. This cookie MUST stay `Lax`:
+ *   - The OIDC round-trip crosses sites: the IdP lives on another origin (Tailscale nip.io
+ *     today, multiple production domains later) while this loopback server runs on localhost.
+ *   - Browsers derive the redirect chain's cookie site from the chain START, so a cross-site
+ *     top-level navigation back from the IdP does NOT carry a Strict cookie → the freshly
+ *     minted session reads as logged out → 303 back to the IdP → infinite login loop
+ *     (2026-09-27 incident, root repo docs/upstream-sync.md).
+ *   - Lax still blocks cross-site subresource/POST (CSRF); it only allows the cross-site
+ *     top-level GET that the OAuth flow needs. Strict is correct ONLY when IdP and app share
+ *     the same site.
  * @param name - cookie 名。
  * @param value - cookie 值。
  * @param expiresAt - 过期时间戳（毫秒）。

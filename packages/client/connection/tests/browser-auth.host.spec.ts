@@ -105,8 +105,19 @@ describe('BrowserAuth', () => {
         'referrer-policy': 'no-referrer',
       },
     })
-    expect(login.state.headers?.['set-cookie']).toMatch(/; Max-Age=2592000; Path=\/; Expires=.*; HttpOnly; SameSite=Lax$/u)
-    expect(login.state.headers?.['set-cookie']).not.toContain('Secure')
+    const sessionCookieHeader = login.state.headers?.['set-cookie']
+    expect(sessionCookieHeader).toMatch(/; Max-Age=2592000; Path=\/; Expires=.*; HttpOnly; SameSite=Lax$/u)
+    // AI / maintainer guard: SameSite MUST be Lax. The OIDC round-trip crosses sites (IdP on a
+    // Tailscale nip.io / production domain, this loopback server on localhost); a cross-site
+    // top-level navigation back from the IdP does NOT carry a Strict cookie, so Strict makes a
+    // freshly minted session read as logged out → 303 back to the IdP → infinite login loop
+    // (2026-09-27 incident, root repo docs/upstream-sync.md). If these assertions fail, someone
+    // reverted Lax→Strict: restore Lax in browser-auth.ts sessionCookie(); do not relax the test.
+    expect(sessionCookieHeader, 'web session cookie must be SameSite=Lax (cross-site OIDC redirect chain; Strict causes an infinite login loop)')
+      .toContain('SameSite=Lax')
+    expect(sessionCookieHeader, 'web session cookie must NOT be SameSite=Strict (cross-site OIDC redirect chain; Strict causes an infinite login loop)')
+      .not.toContain('SameSite=Strict')
+    expect(sessionCookieHeader).not.toContain('Secure')
     expect(first.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: login.cookie }))).toBe(true)
     expect(first.isAuthenticated({
       headers: new Headers({ host: '127.0.0.1:3080', cookie: login.cookie }),
