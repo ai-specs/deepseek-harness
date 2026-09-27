@@ -342,9 +342,12 @@ export class KestraSessionSyncClient {
     void (async () => {
       let backoffMs = 1_000
       let notified = false
+      let stopHeartbeat: (() => void) | undefined
       while (this.inputSseReading) {
         let controller = new AbortController()
         this.inputSseAbort = controller
+        stopHeartbeat?.()
+        stopHeartbeat = undefined
         try {
           const token = await this.bearerToken()
           let response = await this.fetchImpl(
@@ -370,9 +373,14 @@ export class KestraSessionSyncClient {
               notified = true
             }
           }
+          // 方案 A'（2026-09-27）：连接成功即启动应用层心跳，随连接存续；
+          // 断开时停（catch 分支），relay 侧 90s 无心跳判 PC 半开离线。
+          stopHeartbeat = this.startRelayHeartbeat()
           backoffMs = 1_000 // 连接成功重置退避
           await this.readInputSse(response.body, handler, options?.approvalHandler, options?.queryHandler)
         } catch (error) {
+          stopHeartbeat?.()
+          stopHeartbeat = undefined
           // oxlint-disable-next-line typescript/no-unnecessary-condition -- stopInputSse flips this during the async wait
           if (!this.inputSseReading) break
           process.stderr.write(`[kestra-sync] relay SSE disconnected: ${String(error instanceof Error ? error.message : error)} — reconnect in ${backoffMs}ms\n`)
@@ -508,6 +516,51 @@ export class KestraSessionSyncClient {
       )
     } catch {
       // 回填失败静默：Phone 侧下轮查询/本地缓存兜底。
+    }
+  }
+
+  /**
+   * 方案 A' 应用层活性心跳（2026-09-27）：PC 每 30s POST relay /heartbeat。
+   * relay 以 90s 无心跳判 PC 半开离线（断电/死机后心跳停更）——TCP keepalive 对
+   * SSE 心跳连接不生效（出站心跳刷新内核 idle 计数，行为级测试
+   * app-scripts/src/verify/relay-keepalive-test.sh 实证），判死必须由本心跳承担。
+   * 返回停止函数；随 SSE 连接存续（连接断 → 心跳停 → relay 90s 内判 offline）。
+   */
+  private startRelayHeartbeat(): () => void {
+    const base = this.relayBase()
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let inflight = false
+    const beat = async (): Promise<void> => {
+      if (stopped || inflight) return
+      inflight = true
+      try {
+        const token = await this.bearerToken()
+        await this.fetchImpl(
+          `${base}/api/v1/dsh/relay/heartbeat`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: '{}',
+            signal: AbortSignal.timeout(5_000),
+          },
+        )
+      } catch {
+        // 静默：单次失败不重试风暴；relay 侧 90s 超时兜底判离线。
+      } finally {
+        inflight = false
+      }
+    }
+    const loop = (): void => {
+      if (stopped) return
+      timer = setTimeout(() => {
+        void beat().finally(loop)
+      }, 30_000)
+    }
+    void beat().finally(loop)
+    return () => {
+      stopped = true
+      if (timer !== undefined) clearTimeout(timer)
     }
   }
 
