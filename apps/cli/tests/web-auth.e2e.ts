@@ -176,7 +176,10 @@ describe('dsh web authentication through the real CLI', () => {
       const setCookie = exchange.headers.get('set-cookie')
       if (setCookie === null) throw new Error('real CLI token exchange omitted Set-Cookie')
       expect(setCookie).toContain('HttpOnly')
-      expect(setCookie).toContain('SameSite=Strict')
+      expect(setCookie).toContain('SameSite=Lax')
+      // Lax: the OIDC round-trip crosses sites (IdP on another domain); Strict would drop
+      // the cookie on the cross-site top-level navigation back from the IdP, causing a
+      // login loop. See docs/upstream-sync.md 2026-09-27.
       expect(setCookie).not.toContain('Secure')
       const cookie = setCookie.split(';', 1)[0]!
 
