@@ -127,7 +127,7 @@ jobs:
           # dashscope route declared in packages/bundle/base; this env mirrors
           # the endpoint for the sdk-live smoke and skips llm-deepseek-native
           # suites that cannot reach an OpenAI-compatible gateway.
-          DEEPSEEK_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+          DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
           DSH_CI_LLM_ENDPOINT: dashscope
           # DashScope deepseek-flash does not reproduce upstream model tool-chain
           # behaviour (ptc real section, sdk dynamic-tool-cache); gate those off.
