@@ -350,7 +350,7 @@ async function sendGitHubDelivery(origin: string): Promise<Response> {
   })
 }
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('GitHub webhook through the real dsh CLI and model', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('GitHub webhook through the real dsh CLI and model', () => {
   it('creates, attaches, prompts, and completes a Workspace Session', async () => {
     expect(existsSync(BUILT_BIN), `missing built CLI ${BUILT_BIN}; run pnpm run build:official`).toBe(true)
     const root = await mkdtemp(join(tmpdir(), 'dsh-github-webhook-real-'))

@@ -150,7 +150,7 @@ async function backgroundPtcModeHarness(cwd: string): Promise<Context> {
 }
 
 describe('PTC mode typed values: keyless real-process contracts', () => {
-  it('crosses a large intermediate value intact and exposes only typed tool failure fields', async () => {
+  it('crosses a large intermediate value intact and exposes only typed tool failure fields', { timeout: 15_000 }, async () => {
     ctx = await typedPtcModeHarness()
     ctx.tools.register(defineTool({
       name: 'large_value',
@@ -203,7 +203,7 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
     })
   })
 
-  it('returns a background job id, settles the outer run, and polls that id to completion', async () => {
+  it('returns a background job id, settles the outer run, and polls that id to completion', { timeout: 15_000 }, async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-ptc-background-'))
     ctx = await backgroundPtcModeHarness(workdir)
 
@@ -224,7 +224,7 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
     const taskOutput = polled as Record<string, unknown>
     expect(taskOutput.text).toContain('background-complete')
     expect(taskOutput.job).toMatchObject({ id: jobId, kind: 'bash', status: 'completed' })
-  }, 15_000)
+  })
 
   // dsh fork: this keyless abort-timing test races under concurrent CI workers
   // (stable locally); retry 3 absorbs runner-load flakes.
@@ -263,9 +263,9 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
       return await tools.job_output({ job_id: ${JSON.stringify(job!.id)}, wait: true, timeout_ms: 5000 });
     `))
     expect(settled).toMatchObject({ job: { id: job!.id, status: 'killed' } })
-  }, 15_000)
+  })
 
-  it('keeps foreground bash coupled to the outer signal', async () => {
+  it('keeps foreground bash coupled to the outer signal', { timeout: 15_000 }, async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-ptc-foreground-cancel-'))
     ctx = await backgroundPtcModeHarness(workdir)
     const controller = new AbortController()
@@ -278,7 +278,7 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
     expect(result.isError).toBe(true)
     expect(Date.now() - startedAt).toBeLessThan(5_000)
     expect(ctx.jobs.list()).toEqual([])
-  }, 15_000)
+  })
 
   it('uses runtime inspection results directly through PTC', async () => {
     ctx = await typedPtcModeHarness()
