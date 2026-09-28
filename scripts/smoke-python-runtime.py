@@ -1076,7 +1076,7 @@ def smoke_sdk_live() -> None:
             f"Then reply with exactly {LIVE_API_SENTINEL}.\n{marker}"
         )
         with DeepSeekHarness(
-            provider="deepseek-official",
+            provider="dashscope",
             model="deepseek-v4-flash",
             cwd=str(root),
             dsh_home=str(dsh_home),

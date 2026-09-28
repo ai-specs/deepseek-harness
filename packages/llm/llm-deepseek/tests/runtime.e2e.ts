@@ -149,7 +149,11 @@ const weatherTool: ToolSchema = {
   },
 }
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', () => {
+// dsh fork: this suite drives the llm-deepseek adapter's native Messages
+// protocol against the public DeepSeek endpoint. The fork's only available
+// real-LLM endpoint is DashScope (OpenAI-compatible), which this adapter
+// cannot reach, so CI sets DSH_CI_LLM_ENDPOINT=dashscope to skip it there.
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT === 'dashscope')('llm-deepseek e2e (real API)', () => {
   it.skipIf(process.env.DEEPSEEK_FLASH_E2E !== '1')('deepseek-flash accepts images and retains system updates', async () => {
     const ctx = new Context()
     contexts.push(ctx)
