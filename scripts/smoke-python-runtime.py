@@ -297,141 +297,22 @@ class MockModelHandler(BaseHTTPRequestHandler):
     requests: list[dict[str, object]] = []
 
     def do_POST(self) -> None:
+        if self.path != "/v1/messages":
+            self.send_error(404)
+            return
         content_length = int(self.headers.get("content-length", "0"))
         body = json.loads(self.rfile.read(content_length))
         self.requests.append(body)
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.end_headers()
-        if self.path == "/chat/completions":
-            # dsh fork：运行时 llm-deepseek 钉死 protocol: chat-completions
-            # （packages/bundle/base/cordis.patch.yml，DashScope compatible-mode，
-            # 见 .env DEEPSEEK_BASE_URL）。将 OpenAI 风格请求归一化为 Messages
-            # 形态复用场景引擎，再把 Messages 响应块翻译回 OpenAI SSE。
-            chunks = completion_chunks(chat_completions_to_messages(body))
-            for chunk in chunks:
-                translated = messages_chunk_to_chat_completions(chunk)
-                if translated is not None:
-                    self.wfile.write(f"data: {json.dumps(translated)}\n\n".encode())
-            self.wfile.write(b"data: [DONE]\n\n")
-        elif self.path == "/v1/messages":
-            chunks = completion_chunks(body)
-            for chunk in chunks:
-                self.wfile.write(f"event: {chunk['type']}\ndata: {json.dumps(chunk)}\n\n".encode())
-        else:
-            self.send_error(404)
-            return
+        chunks = completion_chunks(body)
+        for chunk in chunks:
+            self.wfile.write(f"event: {chunk['type']}\ndata: {json.dumps(chunk)}\n\n".encode())
         self.wfile.flush()
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
-
-
-def chat_completions_to_messages(body: dict[str, object]) -> dict[str, object]:
-    """Normalize an OpenAI-style chat-completions request to the Messages shape the scenario engine reads.
-
-    The runtime (llm-deepseek, protocol: chat-completions) sends:
-    - ``content`` as a plain string or OpenAI content blocks;
-    - assistant tool calls as ``tool_calls[{id, function:{name, arguments}}]``;
-    - tool results as ``{role: tool, tool_call_id, content}``;
-    - ``tools`` as ``[{type: function, function: {name, description, parameters}}]``.
-    The scenario engine (completion_chunks / assert_advertised_tool) expects
-    Messages blocks (text/tool_use/tool_result) and ``tools[{name, ...}]``.
-    """
-    messages: list[dict[str, object]] = []
-    for message in body.get("messages", []):
-        if not isinstance(message, dict):
-            continue
-        role = message.get("role", "")
-        content = message.get("content")
-        blocks: list[dict[str, object]] = []
-        if isinstance(content, str):
-            if content:
-                blocks.append({"type": "text", "text": content})
-        elif isinstance(content, list):
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") in ("text", "input_text", "output_text"):
-                    text = block.get("text", "")
-                    if isinstance(text, str) and text:
-                        blocks.append({"type": "text", "text": text})
-        if role == "assistant":
-            tool_calls = message.get("tool_calls")
-            if isinstance(tool_calls, list):
-                for tc in tool_calls:
-                    if not isinstance(tc, dict):
-                        continue
-                    fn = tc.get("function")
-                    name = fn.get("name", "") if isinstance(fn, dict) else ""
-                    raw_arguments = fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
-                    try:
-                        arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
-                    except json.JSONDecodeError:
-                        arguments = {}
-                    blocks.append({"type": "tool_use", "id": tc.get("id", ""), "name": name, "input": arguments})
-        if role == "tool" and isinstance(message.get("tool_call_id"), str):
-            result_text = content if isinstance(content, str) else ""
-            blocks.append({
-                "type": "tool_result",
-                "tool_use_id": message["tool_call_id"],
-                "content": [{"type": "text", "text": result_text}],
-            })
-        if role or blocks:
-            messages.append({"role": role, "content": blocks})
-    tools = body.get("tools")
-    normalized_tools: list[dict[str, object]] = []
-    if isinstance(tools, list):
-        for tool in tools:
-            if not isinstance(tool, dict):
-                continue
-            fn = tool.get("function")
-            if isinstance(fn, dict):
-                normalized_tools.append({
-                    "name": fn.get("name", ""),
-                    "description": fn.get("description", ""),
-                    "input_schema": fn.get("parameters", {}),
-                })
-            elif isinstance(tool.get("name"), str):
-                normalized_tools.append(tool)
-    return {"model": body.get("model"), "messages": messages, "tools": normalized_tools}
-
-
-def messages_chunk_to_chat_completions(chunk: dict[str, object]) -> dict[str, object] | None:
-    """Translate one Messages-protocol chunk to an OpenAI-style chat-completions SSE payload.
-
-    ``message_start`` / ``content_block_stop`` / ``message_stop`` carry no wire
-    equivalent and are dropped; the caller appends the literal ``[DONE]`` sentinel.
-    """
-    chunk_type = chunk.get("type")
-    if chunk_type == "content_block_start":
-        block = chunk.get("content_block", {})
-        if isinstance(block, dict) and block.get("type") == "tool_use":
-            return {"choices": [{"index": 0, "delta": {
-                "tool_calls": [{
-                    "index": 0,
-                    "id": block.get("id", ""),
-                    "function": {"name": block.get("name", ""), "arguments": ""},
-                }],
-            }}]}
-        return None
-    if chunk_type == "content_block_delta":
-        delta = chunk.get("delta", {})
-        if not isinstance(delta, dict):
-            return None
-        if delta.get("type") == "text_delta":
-            return {"choices": [{"index": 0, "delta": {"content": delta.get("text", "")}}]}
-        if delta.get("type") == "input_json_delta":
-            return {"choices": [{"index": 0, "delta": {
-                "tool_calls": [{"index": 0, "function": {"arguments": delta.get("partial_json", "")}}],
-            }}]}
-        return None
-    if chunk_type == "message_delta":
-        delta = chunk.get("delta", {})
-        stop_reason = delta.get("stop_reason") if isinstance(delta, dict) else None
-        reason = {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(stop_reason, "stop")
-        return {"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]}
-    return None
 
 
 def completion_chunks(body: dict[str, object]) -> list[dict[str, object]]:
@@ -1019,23 +900,10 @@ def smoke_sdk_authoring(base_url: str, executable: Path, update_snapshots: bool)
             for name in ("office-docx", "office-pptx", "office-xlsx"):
                 assert (name in prompt) == (mode != "disabled"), (mode, name)
             assert ("CUSTOM_OFFICE_DOCX" in prompt) == (mode == "replacement"), mode
-            # 0.1.7 upstream session vocabulary carries tool results as first-class
-            # role:'tool' messages; fall back to the legacy tool_result block shape.
-            tool_message = next(
-                (message for message in requests[1]["messages"]
-                 if message.get("role") == "tool" and message.get("tool_call_id") == "authoring-runtime"),
-                None,
-            )
-            tool_result = tool_message or next(
-                (block for message in requests[1]["messages"]
-                 for block in message.get("content", [])
-                 if isinstance(block, dict) and block.get("tool_use_id") == "authoring-runtime"),
-                None,
-            )
-            if tool_result is None:
-                raise AssertionError(f"authoring-runtime tool result missing from {requests[1]}")
-            tool_content = tool_result["content"] if isinstance(tool_result["content"], str) else tool_result["content"]
-            dependencies = json.loads(tool_content if isinstance(tool_content, str) else message_text(tool_content))
+            tool_result = next(block for message in requests[1]["messages"]
+                               for block in message.get("content", [])
+                               if isinstance(block, dict) and block.get("tool_use_id") == "authoring-runtime")
+            dependencies = json.loads(message_text(tool_result["content"]))
             python = Path(dependencies["python"])
             assert python.is_relative_to(resources), dependencies
             assert Path(dependencies["node"]).is_relative_to(resources), dependencies
@@ -1050,11 +918,7 @@ def smoke_sdk_authoring(base_url: str, executable: Path, update_snapshots: bool)
                 ], check=True, timeout=120,
                     env={name: value for name, value in os.environ.items()
                          if not re.search(r"KEY|SECRET|TOKEN|PASSWORD", name, re.I)})
-                schema = next(
-                    tool for tool in requests[0]["tools"]
-                    if tool.get("name") == "load_workspace_dependencies"
-                    or (tool.get("function") or {}).get("name") == "load_workspace_dependencies"
-                )
+                schema = next(tool for tool in requests[0]["tools"] if tool.get("name") == "load_workspace_dependencies")
                 visible = {"tool": schema, "result": {**dependencies, "python": "{{python}}", "pythonPackages": "{{site-packages}}",
                            **{name: "{{" + name + "}}" for name in ("node", "nodePackages", "pnpm")}}}
                 compare_snapshot_files(
@@ -1274,11 +1138,8 @@ def assert_live_turn(label: str, result: RunResult) -> None:
             f"{label} turn made no model-requested tool call; "
             f"final={result.final_response!r}"
         )
-    # Real providers are non-deterministic: the model may wrap the sentinel in
-    # extra prose even when the prompt asked for exactly the sentinel. Functional
-    # correctness (file bytes, tool calls) is asserted separately; here we only
-    # require the sentinel to appear, not to be the entire reply.
-    if LIVE_API_SENTINEL not in result.final_response:
+    answer_lines = result.final_response.strip().splitlines()
+    if not answer_lines or answer_lines[-1].strip() != LIVE_API_SENTINEL:
         raise AssertionError(f"{label} turn returned {result.final_response!r}")
 
 def safe_turn_end(value: object) -> object:
@@ -1382,15 +1243,9 @@ def smoke_sdk_minimal(
         if in_history:
             patch = root / "in-history.patch.yml"
             patch.write_text(json.dumps([
-                {"id": "llm-deepseek", "config": {
-                    # Patch replaces the plugin config surface, so the fork's
-                    # protocol pin must be restated here (DashScope
-                    # compatible-mode chat-completions).
-                    "protocol": "chat-completions",
-                    "models": [
-                        {"id": "smoke-model", "systemPromptUpdate": "in-history"},
-                    ],
-                }},
+                {"id": "llm-deepseek", "config": {"models": [
+                    {"id": "smoke-model", "systemPromptUpdate": "in-history"},
+                ]}},
                 {"insert": [{
                     "id": "in-history-prompt",
                     "name": (Path(__file__).resolve().parent / "fixtures/python-sdk-in-history-prompt.mjs").as_uri(),
@@ -2335,31 +2190,17 @@ def build_in_history_snapshot_files(
     request_prompts = []
     for index, request in enumerate(requests):
         messages = request["messages"]
-        # chat-completions folds the system prompt into messages[0]; the
-        # Messages protocol carries it in the top-level system field.
-        request_system = message_text(request.get("system"))
-        system_in_messages = False
-        if not request_system and messages and isinstance(messages[0], dict)                 and messages[0].get("role") == "system":
-            request_system = message_text(messages[0].get("content"))
-            system_in_messages = True
-        assert request_system == prompts[0]
+        assert message_text(request.get("system")) == prompts[0]
         assert request["tools"] == requests[0]["tools"], "prompt update changed tool schemas"
-        positions = [
-            position for position, message in enumerate(messages)
-            if message["role"] == "system" and not (system_in_messages and position == 0)
-        ]
-        texts = [request_system, *[
+        positions = [position for position, message in enumerate(messages) if message["role"] == "system"]
+        texts = [message_text(request["system"]), *[
             message_text(messages[position]["content"]) for position in positions
         ]]
         assert texts == (prompts[:1] if index == 0 else prompts), texts
         if index > 0:
             previous = messages[positions[0] - 1]
-            assert previous["role"] in ("user", "tool") and (
-                previous["role"] == "tool"
-                or any(
-                    isinstance(block, dict) and block.get("type") == "tool_result"
-                    for block in previous["content"]
-                )
+            assert previous["role"] == "user" and any(
+                block.get("type") == "tool_result" for block in previous["content"]
             ), messages
         request_prompts.append(texts)
     evidence = {
@@ -2463,50 +2304,20 @@ def minimal_snapshot_message(message: object, cwd: Path) -> dict[str, object]:
     role = message.get("role")
     if role == "system":
         return {"role": role, "text": minimal_snapshot_text(message_text(message.get("content")), cwd)}
-    if role in ("user", "tool"):
-        # chat-completions keeps text-only user content as a plain string and
-        # tool results as separate role=tool messages; the Messages shape folds
-        # both into user content blocks. Normalize to one stable snapshot form.
-        raw = message.get("content", [])
-        if isinstance(raw, str):
-            blocks = [{"type": "text", "text": raw}] if raw else []
-        elif isinstance(raw, list):
-            blocks = raw
-        else:
-            blocks = []
+    if role == "user":
         content = []
-        for block in blocks:
-            if not isinstance(block, dict):
-                # chat-completions compact content may carry non-block entries.
-                continue
+        for block in message.get("content", []):
             if block.get("type") == "tool_result":
                 content.append({"type": "tool_result", "tool_use_id": block.get("tool_use_id"), "content": "{{tool-result}}"})
             elif block.get("type") == "text":
                 content.append(minimal_snapshot_text(block, cwd))
             else:
                 raise AssertionError(f"minimal user message has unexpected content: {block}")
-        if role == "tool" and isinstance(message.get("tool_call_id"), str):
-            content.append({
-                "type": "tool_result",
-                "tool_use_id": message["tool_call_id"],
-                "content": "{{tool-result}}",
-            })
-        return {"role": "user", "content": content}
+        return {"role": role, "content": content}
     if role == "assistant":
         calls = message.get("content")
         if not isinstance(calls, list):
-            # chat-completions assistant text carries no tool calls.
-            calls = []
-        tool_calls = message.get("tool_calls")
-        if isinstance(tool_calls, list):
-            return {
-                "role": role,
-                "toolCalls": [
-                    {"id": call.get("id"), "name": (call.get("function") or {}).get("name")}
-                    for call in tool_calls
-                    if isinstance(call, dict) and isinstance(call.get("function"), dict)
-                ],
-            }
+            raise AssertionError(f"minimal assistant message has no tool calls: {message}")
         return {
             "role": role,
             "toolCalls": [
