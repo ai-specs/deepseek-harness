@@ -18,7 +18,6 @@ const launch = resolveExampleLaunch({
 const decompress = promisify(zstdDecompress)
 
 /** Frame one text or tool response from the local Messages endpoint. */
-/** Frame one text or tool response from the local Messages endpoint. */
 function messagesResponse(content: Record<string, unknown>, stopReason: 'end_turn' | 'max_tokens' | 'tool_use'): string {
   return [
     { type: 'message_start', message: { id: 'sdk-smoke-response', model: 'deepseek-v4-pro', usage: { input_tokens: 3, output_tokens: 0 } } },
@@ -27,28 +26,6 @@ function messagesResponse(content: Record<string, unknown>, stopReason: 'end_tur
     { type: 'message_delta', delta: { stop_reason: stopReason }, usage: { output_tokens: 1 } },
     { type: 'message_stop' },
   ].map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
-}
-
-/** Frame one text or tool response from the local chat-completions endpoint. */
-function chatCompletionsResponse(content: Record<string, unknown>, finishReason: 'stop' | 'length' | 'tool_calls'): string {
-  // dsh fork: the sdk profile pins chat-completions (DashScope compatible-mode);
-  // the sdk-minimal profile keeps the upstream messages protocol, so the mock
-  // must speak whichever SSE shape the incoming endpoint path asks for.
-  const id = 'chatcmpl-sdk-smoke'
-  const base = { id, object: 'chat.completion.chunk', created: 0, model: 'deepseek-v4-pro' }
-  const delta: Record<string, unknown> = content.type === 'tool_use' ? {
-    tool_calls: [{
-      index: 0,
-      id: content.id,
-      type: 'function',
-      function: { name: content.name, arguments: JSON.stringify(content.input) },
-    }],
-  } : { content: content.text }
-  return [
-    `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`,
-    `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: finishReason }] })}\n\n`,
-    'data: [DONE]\n\n',
-  ].join('')
 }
 
 function waitForLine(
@@ -106,11 +83,7 @@ describe('Python SDK dsh profile keyless smoke', () => {
       request.on('end', () => {
         modelRequests.push(JSON.parse(body) as Record<string, unknown>)
         response.writeHead(200, { 'content-type': 'text/event-stream' })
-        if (request.url?.startsWith('/chat/completions')) {
-          response.end(chatCompletionsResponse({ type: 'text', text: 'done' }, 'length'))
-        } else {
-          response.end(messagesResponse({ type: 'text', text: 'done' }, 'max_tokens'))
-        }
+        response.end(messagesResponse({ type: 'text', text: 'done' }, 'max_tokens'))
       })
     })
     await new Promise<void>(resolve => modelServer.listen(0, '127.0.0.1', resolve))
@@ -199,9 +172,9 @@ describe('Python SDK dsh profile keyless smoke', () => {
         },
       })
       expect(modelRequests[0]?.tools).toEqual(expect.any(Array))
-      const tools = modelRequests[0]?.tools as Array<{ function?: { name?: string }; name?: string }>
-      const toolNames = tools.map(tool => tool.function?.name ?? tool.name)
-      expect(modelRequests[0]?.reasoning_effort).toBe('max')
+      const tools = modelRequests[0]?.tools as { name?: string }[]
+      const toolNames = tools.map(tool => tool.name)
+      expect(modelRequests[0]?.output_config).toEqual({ effort: 'max' })
       expect(modelRequests[0]?.max_tokens).toBe(1234)
       expect(toolNames).toEqual(expect.arrayContaining(['read', 'write', 'edit', 'web_fetch', 'web_search']))
       expect(toolNames.includes('str_replace_editor')).toBe(editorEnabled)
@@ -256,17 +229,12 @@ describe('Python SDK dsh profile keyless smoke', () => {
         modelRequests.push(JSON.parse(body) as Record<string, unknown>)
         response.writeHead(200, { 'content-type': 'text/event-stream' })
         const toolCall = editorCalls[modelRequests.length - 1]
-        const content = toolCall ? {
+        response.end(messagesResponse(toolCall ? {
           type: 'tool_use',
           id: `editor-${toolCall.command}`,
           name: 'str_replace_editor',
           input: toolCall,
-        } : { type: 'text', text: 'done' }
-        if (request.url?.startsWith('/chat/completions')) {
-          response.end(chatCompletionsResponse(content, toolCall ? 'tool_calls' : 'stop'))
-        } else {
-          response.end(messagesResponse(content, toolCall ? 'tool_use' : 'end_turn'))
-        }
+        } : { type: 'text', text: 'done' }, toolCall ? 'tool_use' : 'end_turn'))
       })
     })
     await new Promise<void>(resolve => modelServer.listen(0, '127.0.0.1', resolve))
@@ -331,16 +299,28 @@ describe('Python SDK dsh profile keyless smoke', () => {
         bundles: ['@deepseek-ai/dsh-sdk-minimal'],
       })
       expect(modelRequests[0]?.tools).toEqual(expect.any(Array))
-      const tools = modelRequests[0]?.tools as Array<{ function?: { name?: string }; name?: string }>
-      expect(tools.map(tool => tool.function?.name ?? tool.name)).toEqual([
+      const tools = modelRequests[0]?.tools as { name?: string }[]
+      expect(tools.map(tool => tool.name)).toEqual([
         process.platform === 'win32' ? 'pwsh' : 'bash',
         ...(editorEnabled ? ['str_replace_editor'] : []),
       ])
       expect(modelRequests).toHaveLength(editorEnabled ? 3 : 1)
       if (editorEnabled) {
         expect(await readFile(editorFile, 'utf8')).toBe(editorContent)
-        expect(JSON.stringify(modelRequests[2]?.messages)).toContain('editor-view')
-        expect(JSON.stringify(modelRequests[2]?.messages)).toContain(editorContent.trim())
+        expect(modelRequests[2]?.messages).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            role: 'user',
+            content: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'tool_result',
+                tool_use_id: 'editor-view',
+                content: expect.arrayContaining([
+                  { type: 'text', text: expect.stringContaining(editorContent.trim()) as unknown },
+                ]) as unknown,
+              }),
+            ]) as unknown,
+          }),
+        ]))
       }
 
       child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'shutdown' })}\n`)
@@ -470,14 +450,9 @@ it.each(['unset', 'empty', 'bundled', 'full', 'python-only', 'python-only-no-cli
       requests.push(JSON.parse(body) as Record<string, unknown>)
       const query = requests.length === 1 && enabled
       response.writeHead(200, { 'content-type': 'text/event-stream' })
-      const content = query
+      response.end(messagesResponse(query
         ? { type: 'tool_use', id: 'workspace-dependencies', name: 'load_workspace_dependencies', input: {} }
-        : { type: 'text', text: 'done' }
-      if (request.url?.startsWith('/chat/completions')) {
-        response.end(chatCompletionsResponse(content, query ? 'tool_calls' : 'stop'))
-      } else {
-        response.end(messagesResponse(content, query ? 'tool_use' : 'end_turn'))
-      }
+        : { type: 'text', text: 'done' }, query ? 'tool_use' : 'end_turn'))
     })
   })
   onTestFinished(() => new Promise<void>((resolve) => { server.close(() => { resolve() }) }))
@@ -516,35 +491,37 @@ it.each(['unset', 'empty', 'bundled', 'full', 'python-only', 'python-only-no-cli
     const params = value.params as { sessionId?: string; event?: { type?: string } } | undefined
     return value.method === 'session.event' && params?.sessionId === 'office' && params.event?.type === 'turn/end'
   }, () => stderr)
-  const names = (requests[0]!.tools as { name?: string; function?: { name?: string } }[]).map(value => value.function?.name ?? value.name)
+  const names = (requests[0]!.tools as { name: string }[]).map(value => value.name)
   expect(names.includes('load_workspace_dependencies')).toBe(enabled)
   for (const name of ['office-docx', 'office-pptx', 'office-xlsx']) {
     expect(JSON.stringify(requests[0]!.messages).includes(name)).toBe(enabled && mode !== 'missing-assets' && mode !== 'python-only')
   }
   if (mode === 'wrong-type') {
     expect(requests).toHaveLength(2)
-    // dsh fork: the sdk profile pins chat-completions, so the tool result is a
-    // chat-shaped tool message (tool_call_id) rather than a messages-shaped
-    // user/tool_result block; assert on the serialized facts instead of the
-    // protocol-specific envelope.
-    const serialized = JSON.stringify(requests[1]!.messages)
-    expect(serialized).toContain('workspace-dependencies')
-    expect(serialized).toContain('expected file at')
-    expect(serialized).toContain(paths.python.slice(1, -1))
-    expect(serialized).toContain('primary runtime')
+    const messages = requests[1]!.messages as { content: { type: string; tool_use_id?: string; content?: unknown }[] }[]
+    const result = messages.flatMap(message => message.content).find(block => block.tool_use_id === 'workspace-dependencies')
+    expect(JSON.parse(JSON.stringify(result).replaceAll(JSON.stringify(paths.python).slice(1, -1), '<python>'))).toMatchInlineSnapshot(`
+      {
+        "content": [
+          {
+            "text": "Error: primary runtime: expected file at <python>",
+            "type": "text",
+          },
+        ],
+        "is_error": true,
+        "tool_use_id": "workspace-dependencies",
+        "type": "tool_result",
+      }
+    `)
   } else if (enabled) {
     expect(requests).toHaveLength(2)
-    // dsh fork: the sdk profile pins chat-completions, so the tool result arrives
-    // as a chat-shaped user message whose content is a JSON string (escaped when
-    // re-serialized). Assert on the payload facts that survive either protocol
-    // envelope instead of the pretty-printed object, which only matches in the
-    // messages protocol.
-    const serialized = JSON.stringify(requests[1]!.messages)
-    expect(serialized).toContain('load_workspace_dependencies')
-    expect(serialized).toContain(paths.python)
-    expect(serialized).toContain(paths.pythonPackages)
-    if (paths.node !== undefined) expect(serialized).toContain(paths.node)
-    expect(serialized).toContain('python-docx')
+    const content: unknown = expect.arrayContaining([
+      expect.objectContaining({ type: 'tool_result', tool_use_id: 'workspace-dependencies',
+        content: [{ type: 'text', text: JSON.stringify(paths, undefined, 2) }] }),
+    ])
+    expect(requests[1]!.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'user', content }),
+    ]))
   }
   if (mode === 'python-only') expect(stderr).toContain('node')
   if (mode === 'missing-assets') expect(stderr).toContain('check_office.py')
