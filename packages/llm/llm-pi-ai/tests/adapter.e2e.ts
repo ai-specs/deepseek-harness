@@ -64,7 +64,7 @@ const weatherTool: ToolSchema = {
   },
 }
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-pi-ai e2e (real API)', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('llm-pi-ai e2e (real API)', () => {
   it(`${FLASH} + provider-default reasoning: plain text generation`, async () => {
     const ctx = await harness(FLASH)
     const result = await assemble(ctx,{

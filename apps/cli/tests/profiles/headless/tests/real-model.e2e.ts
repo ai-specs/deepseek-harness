@@ -9,7 +9,7 @@ const configPath = fileURLToPath(new URL('../real-model.patch.yml', import.meta.
 const tsconfigPath = fileURLToPath(new URL('../../../../../../tsconfig.json', import.meta.url))
 const hasKey = Boolean(process.env.DEEPSEEK_API_KEY)
 
-describe.skipIf(!hasKey)('headless-agent with real model', () => {
+describe.skipIf(!hasKey || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('headless-agent with real model', () => {
   it('modifies a temporary workspace and verifies the file outside the agent', async () => {
     let verified = ''
     const { stdout } = await runLoaderSmoke({

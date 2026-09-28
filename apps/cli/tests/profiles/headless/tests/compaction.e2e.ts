@@ -24,7 +24,7 @@ afterEach(async () => {
   workdir = undefined
 })
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('compaction: a long session compacts mid-flight and keeps running', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('compaction: a long session compacts mid-flight and keeps running', () => {
   it('summarizes older history into a checkpoint without breaking the task', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-compaction-'))
     // An older file result must exceed the framed checkpoint's fixed sections.

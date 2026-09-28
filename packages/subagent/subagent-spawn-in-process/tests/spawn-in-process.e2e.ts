@@ -19,7 +19,7 @@ afterEach(async () => {
   workdir = undefined
 })
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('spawn backend with-key smoke', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('spawn backend with-key smoke', () => {
   it('a parent delegates to a child that writes a file on disk', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-subagent-spawn-e2e-'))
     ctx = await spawnHarness(workdir)

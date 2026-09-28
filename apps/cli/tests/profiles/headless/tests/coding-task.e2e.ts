@@ -44,7 +44,7 @@ afterEach(async () => {
   workdir = undefined
 })
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('coding task: fix a failing test via bash', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('coding task: fix a failing test via bash', () => {
   it('repairs add.js so node add.test.js passes', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-coding-task-'))
     await writeFile(join(workdir, 'add.js'), BUGGY_ADD)

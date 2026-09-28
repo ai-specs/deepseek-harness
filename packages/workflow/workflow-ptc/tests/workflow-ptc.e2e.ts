@@ -45,7 +45,7 @@ const judged = await agent(
 )
 return { prose, containsFour: judged === null ? null : judged.containsFour }`
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('PTC workflow engine with-key e2e', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('PTC workflow engine with-key e2e', () => {
   it('runs a two-phase script in the Node PTC runtime over real children, one through the structured runtime', async () => {
     ctx = await harness()
     const parentHandle = await ctx.agents.create({

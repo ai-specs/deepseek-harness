@@ -44,7 +44,7 @@ afterEach(async () => {
   await cleanupAcpExampleTest(ownedSpawned, ownedWorkdir)
 })
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('acp-agent e2e: a PreToolUse hook blocks bash (real model)', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('acp-agent e2e: a PreToolUse hook blocks bash (real model)', () => {
   it('denies every bash command, so the requested file is never written (verified on disk)', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'acp-hooks-e2e-'))
     // `configPath` is process-relative, so placing the match-all hook in the

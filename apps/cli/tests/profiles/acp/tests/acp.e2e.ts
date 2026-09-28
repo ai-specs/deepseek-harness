@@ -98,7 +98,7 @@ describe('acp-agent over real stdio (no key required)', () => {
   }, 60_000)
 })
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('acp-agent e2e: real prompt over ACP', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('acp-agent e2e: real prompt over ACP', () => {
   it('runs a real turn and the agent writes the requested file (verified on disk)', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'acp-e2e-'))
     spawned = launchAcpTestAgent({ agent: AGENT, cwd: workdir, env: DANGER_FULL_ACCESS_ENV })

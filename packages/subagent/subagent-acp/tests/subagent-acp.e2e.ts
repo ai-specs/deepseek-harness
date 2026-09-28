@@ -53,7 +53,7 @@ afterEach(async () => {
   workdir = undefined
 })
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('ACP backend with-key e2e (drive our own acp-agent)', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('ACP backend with-key e2e (drive our own acp-agent)', () => {
   it('drives the real acp-agent example process to answer a prompt', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-subagent-acp-e2e-'))
     const childLaunch = resolveChildLaunch(join(workdir, '.dsh-child'))

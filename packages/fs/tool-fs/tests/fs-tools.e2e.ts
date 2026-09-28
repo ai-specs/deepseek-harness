@@ -22,7 +22,7 @@ afterEach(async () => {
 const SYSTEM = 'You are a coding assistant. Use the write tool to create files, the read tool to inspect '
   + 'them, and the edit tool for literal replacements. Read a file before editing it. Keep replies terse.'
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('fs tools with-key smoke', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('fs tools with-key smoke', () => {
   it('creates, reads, then edits a file — verified on disk', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-fs-e2e-'))
     ctx = await fsHarness(workdir, SYSTEM)

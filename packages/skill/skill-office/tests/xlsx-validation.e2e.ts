@@ -72,7 +72,7 @@ const cases = [
 // (objective model capability absent); data/formula still cover the loop.
 const skipModelBehavior = process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1'
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY || !runtime)('Excel validation scope', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || !runtime || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('Excel validation scope', () => {
   it.each(cases.filter(({ kind }) => !skipModelBehavior || (kind !== 'layout' && kind !== 'blank')))('$name', async ({ task, kind }) => {
     let events: SessionEvent[] = []
     let original: Buffer | undefined

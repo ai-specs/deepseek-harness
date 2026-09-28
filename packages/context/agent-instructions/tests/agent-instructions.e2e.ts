@@ -70,7 +70,7 @@ function finalText(events: readonly SessionEvent[]): string {
     .join('')
 }
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('workspace context e2e: real model sees AGENTS.md baseline', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('workspace context e2e: real model sees AGENTS.md baseline', () => {
   it('obeys a probe instruction loaded from the workspace', async () => {
     const live = await harness()
 
