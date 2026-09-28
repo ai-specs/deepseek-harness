@@ -47,7 +47,10 @@ async function boot(models?: Messages.Options['models']) {
 }
 const tool = { name: 'lookup_value', description: 'Read the requested value. Always call this tool to obtain a value.', parameters: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } }
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('DeepSeek Messages real API', () => {
+// dsh fork: DashScope (OpenAI-compatible) is the fork's only available real-LLM
+// endpoint; llm-deepseek's native Messages protocol cannot reach it, so CI sets
+// DSH_CI_LLM_ENDPOINT=dashscope to skip this suite there.
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT === 'dashscope')('DeepSeek Messages real API', () => {
   it.skipIf(!IN_HISTORY_MODEL).each([false, true])('updates system instructions during a conversation, in-history=%s', async (inHistory) => {
     const model = IN_HISTORY_MODEL as string
     // Each case owns the capability, even for a model with an in-history catalog default.

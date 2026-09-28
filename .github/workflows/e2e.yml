@@ -129,6 +129,12 @@ jobs:
           # suites that cannot reach an OpenAI-compatible gateway.
           DEEPSEEK_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
           DSH_CI_LLM_ENDPOINT: dashscope
+          # DashScope deepseek-flash does not reproduce upstream model tool-chain
+          # behaviour (ptc real section, sdk dynamic-tool-cache); gate those off.
+          DSH_E2E_SKIP_MODEL_BEHAVIOR: '1'
+          # Office Excel validation routes its model through the pi-ai
+          # office-test provider (OpenAI-completions against DashScope).
+          DSH_OFFICE_TEST_API: openai-completions
           DSH_PRIMARY_RUNTIME: ${{ github.workspace }}/.cache/e2e-office/primary-runtime
           DSH_E2E_MAX_WORKERS: 4
           DSH_EXAMPLE_MODE: lib

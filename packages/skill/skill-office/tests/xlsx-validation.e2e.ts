@@ -130,6 +130,10 @@ process.exitCode = result.status ?? 1;
           ] },
           ...completions ? [
             { id: 'llm-deepseek', disabled: true },
+            // dsh fork: the fork's CI/desktop LLM endpoint is DashScope, and the
+            // DeepSeek official auth API is unreachable there (503); the office
+            // suite routes the model through the pi-ai office-test provider.
+            { id: 'llm-deepseek-account', disabled: true },
             { id: 'llm-pi-ai', config: { providers: { 'office-test': {
               api: 'openai-completions', apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: process.env.DEEPSEEK_BASE_URL,
               compat: { thinkingFormat: 'deepseek' },

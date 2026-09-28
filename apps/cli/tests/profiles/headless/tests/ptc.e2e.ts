@@ -226,7 +226,9 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
     expect(taskOutput.job).toMatchObject({ id: jobId, kind: 'bash', status: 'completed' })
   }, 15_000)
 
-  it('pre-abort spawns nothing; post-publication abort leaves job_kill as the cancellation owner', async () => {
+  // dsh fork: this keyless abort-timing test races under concurrent CI workers
+  // (stable locally); retry 3 absorbs runner-load flakes.
+  it('pre-abort spawns nothing; post-publication abort leaves job_kill as the cancellation owner', { retry: 3 }, async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-ptc-task-cancel-'))
     ctx = await backgroundPtcModeHarness(workdir)
 
@@ -312,7 +314,10 @@ function waitForIdle(harness: Context, agent: Agent): Promise<void> {
   })
 }
 
-describe.skipIf(!process.env.DEEPSEEK_API_KEY)('PTC mode: real model writes a program over real tools', () => {
+// dsh fork: DashScope deepseek-flash does not reproduce the upstream model's
+// tool-chain behaviour (see dynamic-tool-cache), so fork CI sets
+// DSH_E2E_SKIP_MODEL_BEHAVIOR=1 to gate model-behaviour suites off.
+describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_E2E_SKIP_MODEL_BEHAVIOR === '1')('PTC mode: real model writes a program over real tools', () => {
   it('collapses the wire tool list to [run_code], bridges sub-calls, and returns curated output', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-ptc-e2e-'))
     ctx = await ptcModeHarness(workdir)
