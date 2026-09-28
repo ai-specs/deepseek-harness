@@ -53,7 +53,6 @@ async function harness(
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
   await ctx.plugin(LlmDeepSeek, {
-    protocol: 'messages',
     baseURL,
     streamIdleTimeoutMs: options.streamIdleTimeoutMs ?? 1_000,
     retryPolicy: {
