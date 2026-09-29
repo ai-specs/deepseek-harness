@@ -105,6 +105,7 @@ describe('Python SDK dsh profile keyless smoke', () => {
         DSH_TELEMETRY_DISABLED: '1',
         DEEPSEEK_API_KEY: 'keyless-smoke-no-call',
         DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
+        DEEPSEEK_MESSAGES_BASE_URL: `http://127.0.0.1:${address.port}`,
         ...(envValue === undefined ? {} : { DSH_MAX_TOKENS_AS_SUCCESS: envValue }),
       },
       timeout: 35_000,
@@ -253,6 +254,7 @@ describe('Python SDK dsh profile keyless smoke', () => {
         DSH_SYSTEM_PROMPT: 'Minimal allowlist prompt.',
         DEEPSEEK_API_KEY: 'keyless-smoke-no-call',
         DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
+        DEEPSEEK_MESSAGES_BASE_URL: `http://127.0.0.1:${address.port}`,
       },
       timeout: 35_000,
       killSignal: 'SIGKILL',
@@ -468,7 +470,7 @@ it.each(['unset', 'empty', 'bundled', 'full', 'python-only', 'python-only-no-cli
     env: { DSH_HOME: home, DSH_PRIMARY_RUNTIME: mode === 'unset' || mode === 'bundled' ? undefined : mode === 'empty' ? '' : source + '/',
       DSH_BUNDLED_PRIMARY_RUNTIME: mode === 'unset' ? undefined : mode === 'bundled' || mode === 'empty' ? source : join(root, 'unused-default'),
       DSH_PERMISSION_MODE: 'danger-full-access', DSH_TELEMETRY_DISABLED: '1',
-      DEEPSEEK_API_KEY: 'local-fixture', DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}` },
+      DEEPSEEK_API_KEY: 'local-fixture', DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`, DEEPSEEK_MESSAGES_BASE_URL: `http://127.0.0.1:${address.port}` },
   })
   const child = execa(officeLaunch.command, officeLaunch.args, { cwd: repoRoot, env: officeLaunch.env, timeout: 60_000, reject: false })
   onTestFinished(async () => { child.kill('SIGKILL'); await child })
