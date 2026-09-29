@@ -43,6 +43,10 @@ const VISION = 'deepseek-v4-flash-vision-exp'
 const VISION_E2E_ENABLED = process.env.DEEPSEEK_VISION_E2E === '1'
 /** A model whose endpoint reads the latest `system` message at any position; unset skips the in-history smoke. */
 const IN_HISTORY_MODEL = process.env.DEEPSEEK_IN_HISTORY_MODEL
+// dsh fork: no official DeepSeek key; the real-API suite runs the native
+// Messages protocol against the DashScope Anthropic-compatible root supplied
+// by the CI variable DEEPSEEK_MESSAGES_BASE_URL.
+const E2E_BASE_URL = process.env.DEEPSEEK_MESSAGES_BASE_URL ?? Protocol.PUBLIC_BASE_URL
 const TEST_PNG = Uint8Array.from(readFileSync(
   new URL('../../llm-pi-ai/tests/fixtures/qr-code.png', import.meta.url),
 ))
@@ -111,7 +115,7 @@ async function harness(model: string, config: Partial<Config> = {}) {
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(E2eAttachmentStore)
   await ctx.plugin(LlmDeepSeek, {
-    baseURL: Protocol.PUBLIC_BASE_URL,
+    baseURL: E2E_BASE_URL,
     ...model === VISION ? { models: [{ id: VISION, inputModalities: ['text', 'image'] }] } : {},
     ...config,
   })
@@ -149,17 +153,16 @@ const weatherTool: ToolSchema = {
   },
 }
 
-// dsh fork: this suite drives the llm-deepseek adapter's native Messages
-// protocol against the public DeepSeek endpoint. The fork's only available
-// real-LLM endpoint is DashScope (OpenAI-compatible), which this adapter
-// cannot reach, so CI sets DSH_CI_LLM_ENDPOINT=dashscope to skip it there.
-describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT === 'dashscope')('llm-deepseek e2e (real API)', () => {
+// dsh fork: no official DeepSeek key; the real-API suite runs the native
+// Messages protocol against the DashScope Anthropic-compatible root supplied
+// by the CI variable DEEPSEEK_MESSAGES_BASE_URL.
+describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', () => {
   it.skipIf(process.env.DEEPSEEK_FLASH_E2E !== '1')('deepseek-flash accepts images and retains system updates', async () => {
     const ctx = new Context()
     contexts.push(ctx)
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(LocalAttachments)
-    await ctx.plugin(LlmDeepSeek, { baseURL: Protocol.PUBLIC_BASE_URL, maxTokens: 4096 })
+    await ctx.plugin(LlmDeepSeek, { baseURL: E2E_BASE_URL, maxTokens: 4096 })
     const model = 'deepseek-flash'
     await expect(ctx.llm.resolveModelInfo('deepseek-official', model)).resolves.toMatchObject({
       inputModalities: ['text', 'image'], systemPromptUpdate: 'in-history',
@@ -186,7 +189,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT
   it.skipIf(!VISION_E2E_ENABLED)('uses the built-in official route to upload, reference, and delete one image', async () => {
     const key = process.env.DEEPSEEK_API_KEY
     if (key === undefined) throw new Error('e2e ran without DEEPSEEK_API_KEY')
-    const baseURL = Protocol.PUBLIC_BASE_URL
+    const baseURL = E2E_BASE_URL
     const ctx = await harness(VISION, { baseURL })
     await ctx.plugin(E2eAttachmentStore)
     const attachments = ctx.attachments as E2eAttachmentStore
@@ -238,7 +241,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT
     await ctx.plugin(DeepSeekLlmApiExtensionRegistry)
     await ctx.plugin(SessionLogDeepSeek, { enabled: true })
     await ctx.plugin(PluginPackageInventoryDeepSeek)
-    await ctx.plugin(LlmDeepSeek, { baseURL: Protocol.PUBLIC_BASE_URL, thinking: 'disabled' })
+    await ctx.plugin(LlmDeepSeek, { baseURL: E2E_BASE_URL, thinking: 'disabled' })
     const session = ctx.sessions.create(SessionId('real-extension-fields'))
     session.append('turn/start', { turn: 1 })
 
@@ -268,7 +271,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT
       contexts.push(ctx)
       await ctx.plugin(LlmRuntime)
       await ctx.plugin(LocalCredentialProvider, { path: join(dir, '.credentials.yaml'), watch: false })
-      await ctx.plugin(LlmDeepSeek, { baseURL: Protocol.PUBLIC_BASE_URL })
+      await ctx.plugin(LlmDeepSeek, { baseURL: E2E_BASE_URL })
 
       const result = await assemble(ctx, {
         model: FLASH,

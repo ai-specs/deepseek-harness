@@ -123,11 +123,14 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
           # dsh fork: DashScope is the fork's only available real-LLM endpoint
-          # (objective constraint). Real-API tests route through the llm-pi-ai
-          # dashscope route declared in packages/bundle/base; this env mirrors
-          # the endpoint for the sdk-live smoke and skips llm-deepseek-native
-          # suites that cannot reach an OpenAI-compatible gateway.
+          # (objective constraint). DashScope exposes an Anthropic-compatible
+          # root (apps/anthropic) that serves llm-deepseek's native Messages
+          # protocol — the real-API Messages suites (adapter/runtime) run
+          # against it. DEEPSEEK_BASE_URL (OpenAI-compatible) is kept for the
+          # pi-ai dashscope route (packages/bundle/base) and sdk-live smoke.
           DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
+          DEEPSEEK_MESSAGES_BASE_URL: ${{ vars.DEEPSEEK_MESSAGES_BASE_URL || 'https://dashscope.aliyuncs.com/apps/anthropic' }}
+          DEEPSEEK_MODEL_NAME: ${{ vars.DEEPSEEK_MODEL_NAME || 'deepseek-v4-flash' }}
           DSH_CI_LLM_ENDPOINT: dashscope
           # DashScope deepseek-flash does not reproduce upstream model tool-chain
           # behaviour (ptc real section, sdk dynamic-tool-cache); gate those off.

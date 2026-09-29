@@ -25,6 +25,9 @@ import { MESSAGES_FILES_BETA } from '../src/messages-api.ts'
 import { assemble, options, user, sourceModuleLoader } from './helpers.ts'
 
 const IN_HISTORY_MODEL = process.env.DEEPSEEK_IN_HISTORY_MODEL
+// dsh fork: no official DeepSeek key; the real-API Messages suite runs against
+// the DashScope Anthropic-compatible root supplied by DEEPSEEK_MESSAGES_BASE_URL.
+const E2E_BASE_URL = process.env.DEEPSEEK_MESSAGES_BASE_URL ?? Protocol.PUBLIC_BASE_URL
 const cleanups: (() => Promise<unknown>)[] = []
 afterEach(async () => {
   while (cleanups.length) await cleanups.pop()!()
@@ -39,7 +42,7 @@ async function boot(models?: Messages.Options['models']) {
   cleanups.push(() => ctx.fiber.dispose())
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(Messages, {
-    baseURL: Protocol.PUBLIC_BASE_URL,
+    baseURL: E2E_BASE_URL,
     maxTokens: 4096,
     ...models === undefined ? {} : { models },
   })
@@ -47,10 +50,7 @@ async function boot(models?: Messages.Options['models']) {
 }
 const tool = { name: 'lookup_value', description: 'Read the requested value. Always call this tool to obtain a value.', parameters: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } }
 
-// dsh fork: DashScope (OpenAI-compatible) is the fork's only available real-LLM
-// endpoint; llm-deepseek's native Messages protocol cannot reach it, so CI sets
-// DSH_CI_LLM_ENDPOINT=dashscope to skip this suite there.
-describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT === 'dashscope')('DeepSeek Messages real API', () => {
+describe.skipIf(!process.env.DEEPSEEK_API_KEY)('DeepSeek Messages real API', () => {
   it.skipIf(!IN_HISTORY_MODEL).each([false, true])('updates system instructions during a conversation, in-history=%s', async (inHistory) => {
     const model = IN_HISTORY_MODEL as string
     // Each case owns the capability, even for a model with an in-history catalog default.
@@ -72,14 +72,17 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT
     await reply('PROMPT_CLEARED')
   })
 
-  it('uploads, lists, retrieves, reuses, and replaces a deleted Files image across Messages requests', async () => {
+  // DashScope's Anthropic-compatible root does not support Files/image round trips
+  // (verified on deepseek-v4-flash/-pro/-vision-exp), so the Files suite only runs
+  // when the CI explicitly opts in via DEEPSEEK_FILES_E2E=1.
+  it.skipIf(process.env.DEEPSEEK_FILES_E2E !== '1')('uploads, lists, retrieves, reuses, and replaces a deleted Files image across Messages requests', async () => {
     const ctx = await boot()
     await ctx.plugin(LocalAttachments)
     const fetchImpl = globalThis.fetch
     const uploads: string[] = []
     const bodies: string[] = []
     const files = new DeepSeekFilesClient({
-      baseURL: Protocol.PUBLIC_BASE_URL, headers: { 'x-api-key': process.env.DEEPSEEK_API_KEY as string }, fetch: fetchImpl,
+      baseURL: E2E_BASE_URL, headers: { 'x-api-key': process.env.DEEPSEEK_API_KEY as string }, fetch: fetchImpl,
     })
     const ownedFiles = new Set<ReturnType<typeof Protocol.DeepSeekFileId>>()
     cleanups.push(async () => {
@@ -88,12 +91,12 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT
     vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       const response = await fetchImpl(input, init)
-      if (url === `${Protocol.PUBLIC_BASE_URL}/v1/files` && init?.method === 'POST' && response.ok) {
+      if (url === `${E2E_BASE_URL}/v1/files` && init?.method === 'POST' && response.ok) {
         const file = await response.clone().json() as { id: string }
         uploads.push(file.id)
         ownedFiles.add(Protocol.DeepSeekFileId(file.id))
       }
-      if (url === `${Protocol.PUBLIC_BASE_URL}/v1/messages`) {
+      if (url === `${E2E_BASE_URL}/v1/messages`) {
         expect(new Headers(init?.headers).get('anthropic-beta')).toBe(MESSAGES_FILES_BETA)
         if (typeof init?.body !== 'string') throw new Error('expected a JSON Messages request')
         bodies.push(init.body)
@@ -166,7 +169,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || process.env.DSH_CI_LLM_ENDPOINT
     let requests = 0
     vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      if (url !== `${Protocol.PUBLIC_BASE_URL}/v1/messages`) return fetchImpl(input, init)
+      if (url !== `${E2E_BASE_URL}/v1/messages`) return fetchImpl(input, init)
       if (typeof init?.body !== 'string') throw new Error('expected a JSON Messages request')
       const body = JSON.parse(init.body) as Record<string, unknown>
       expect(body).toMatchObject({ dsh_plugin_packages: {
